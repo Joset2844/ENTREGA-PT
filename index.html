@@ -420,7 +420,8 @@ $("actCat").addEventListener("dblclick",function(){var a="",b="";try{a=localStor
 
 // ---- Google Sheets (Apps Script)
 var K_SB="ctrl_sheets_url",K_TOK="ctrl_sheets_token";
-function cfgSb(){var u="",t="";try{u=localStorage.getItem(K_SB)||"";t=localStorage.getItem(K_TOK)||""}catch(e){}return{url:u,token:t}}
+var DEFAULT_SB_URL="https://script.google.com/macros/s/AKfycbyGl0Z5bhefLY8ZC4rf2IH1wXqtkKZYBsfo6CvXeXwI5W1vrataEqa9M5NnT84iDSw2hQ/exec",DEFAULT_SB_TOKEN="123456";
+function cfgSb(){var u=DEFAULT_SB_URL,t=DEFAULT_SB_TOKEN;try{u=localStorage.getItem(K_SB)||DEFAULT_SB_URL;t=localStorage.getItem(K_TOK)||DEFAULT_SB_TOKEN}catch(e){}return{url:u,token:t}}
 function llamar(payload){var c=cfgSb();if(!c.url)return Promise.reject(new Error("sin URL"));payload.token=c.token;
   return fetch(c.url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)})
     .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||"error");return j})}
