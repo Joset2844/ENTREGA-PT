@@ -75,7 +75,7 @@ input[type=date]{-webkit-appearance:none;appearance:none}
 .sug button{padding:13px 12px}
 .toast{top:calc(14px + env(safe-area-inset-top));max-width:92vw;text-align:center}
 .tools .btn-s{flex:1 1 40%}
-#cuenta{flex:1 1 100%}
+#cuenta,#iCuenta{flex:1 1 100%}
 #guardar{margin-top:6px}
 @media(max-width:380px){.chip{font-size:.7rem;padding:8px 4px}.panel{padding:12px}.row2{gap:8px}}
 @media(min-width:700px){
@@ -83,7 +83,7 @@ input[type=date]{-webkit-appearance:none;appearance:none}
   .wrap{max-width:1000px}
   .tabs{gap:10px}.tab{font-size:.82rem;flex:0 0 auto;padding:8px 26px}
   main{padding:22px 0}
-  #regForm{display:grid;grid-template-columns:1fr 1fr;gap:0 32px;padding:24px;align-items:start}
+  #regForm,#ingForm{display:grid;grid-template-columns:1fr 1fr;gap:0 32px;padding:24px;align-items:start}
   .btn{padding:14px;font-size:.95rem}
   #t-lista>.panel{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
   #t-lista>.panel .row2{display:contents}
@@ -95,12 +95,22 @@ input[type=date]{-webkit-appearance:none;appearance:none}
   #t-cfg{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
   #t-cfg .panel{margin:0}
   .tools .btn-s{flex:0 0 auto;padding:10px 18px}
-  #cuenta{flex:0 0 auto}
+  #cuenta,#iCuenta{flex:0 0 auto}
 }
 @media(min-width:1100px){
   .wrap{max-width:1180px}
   #lista{grid-template-columns:repeat(3,1fr)}
 }
+#iLista .card{overflow-wrap:anywhere}
+@media(max-width:420px){.tab{padding:7px 2px;font-size:.66rem}}
+@media(min-width:700px){
+  #iFiltros{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  #iFiltros .row2{display:contents}
+  #iLista{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+  #iLista .card{margin-bottom:0}
+  #iLista .empty{grid-column:1/-1}
+}
+@media(min-width:1100px){#iLista{grid-template-columns:repeat(3,1fr)}}
 </style>
 </head>
 <body>
@@ -109,6 +119,7 @@ input[type=date]{-webkit-appearance:none;appearance:none}
   <div class="tabs" id="tabs">
     <button class="tab active" data-t="reg">Registrar</button>
     <button class="tab" data-t="lista">Registros</button>
+    <button class="tab" data-t="ing">Ingresos</button>
     <button class="tab" data-t="cfg">Config</button>
   </div>
 </div></header>
@@ -185,6 +196,61 @@ input[type=date]{-webkit-appearance:none;appearance:none}
   <div id="lista"></div>
 </div>
 
+<!-- INGRESOS A ALMACÉN -->
+<div id="t-ing" class="hidden">
+<div class="panel">
+  <div class="sec">Ingreso a almacén</div>
+  <div class="row2">
+    <div class="field"><label>Fecha</label><input type="date" id="iFecha"/></div>
+    <div class="field"><label>Habilitador</label><select id="iNombre"></select></div>
+  </div>
+  <div class="chips" id="iTurno" style="margin-bottom:6px">
+    <button class="chip active" data-v="Día">Turno Día</button>
+    <button class="chip" data-v="Noche">Turno Noche</button>
+  </div>
+</div>
+<div id="ingForm" class="panel">
+  <div class="fcol">
+  <div class="field"><label>OP</label><input type="text" id="iOp" class="mono" placeholder="Ej. OP-10234" autocomplete="off"/><div class="sug hidden" id="iSug"></div></div>
+  <div id="iModelos" class="chips hidden" style="flex-wrap:wrap"></div>
+  <div class="field"><label>Descripción</label><input type="text" id="iDesc" placeholder="Se autocompleta con la OP"/></div>
+  <div class="row2">
+    <div class="field"><label>Cliente</label><input type="text" id="iCliente" placeholder="Se autocompleta con la OP"/></div>
+    <div class="field"><label>Código SAP</label><input type="text" id="iSap" class="mono" placeholder="Según modelo"/></div>
+  </div>
+  </div>
+  <div class="fcol">
+  <div class="sec">Cantidad ingresada</div>
+  <div class="chips" id="iEmpTipo"><button class="chip active" data-v="caja">Caja</button><button class="chip" data-v="paquete">Paquete</button></div>
+  <div class="row2">
+    <div class="field"><label>Unid. x caja</label><input type="number" min="0" id="iU" class="mono" placeholder="0"/></div>
+    <div class="field"><label>Cant. cajas</label><input type="number" min="0" id="iC" class="mono" placeholder="0"/></div>
+  </div>
+  <div class="total"><span>Total ingresado</span><b class="mono" id="iT">0</b></div>
+  <button class="btn" id="iGuardar">Guardar ingreso</button>
+  </div>
+</div>
+<div class="panel" id="iFiltros">
+  <div class="row2">
+    <div class="field" style="margin:0"><label>Fecha</label><input type="date" id="iFFecha"/></div>
+    <div class="field" style="margin:0"><label>Turno</label><select id="iFTurno"><option value="">Todos</option><option>Día</option><option>Noche</option></select></div>
+  </div>
+  <div class="row2" style="margin-top:10px">
+    <div class="field" style="margin:0"><label>Habilitador</label><select id="iFNombre"><option value="">Todos</option></select></div>
+    <div class="field" style="margin:0"><label>Buscar (OP, SAP, cliente…)</label><input type="text" id="iFTexto"/></div>
+  </div>
+</div>
+<div class="tools">
+  <button class="btn-s" id="iExp">Excel</button>
+  <button class="btn-s" id="iImp">Imprimir</button>
+  <button class="btn-s" id="iEnv">Enviar a Sheets</button>
+  <button class="btn-s" id="iTraer">Traer de Sheets</button>
+  <button class="btn-s" id="iLimpiar">Quitar filtros</button>
+  <span id="iCuenta" style="font-size:.74rem;color:var(--muted)"></span>
+</div>
+<div id="iLista"></div>
+</div>
+
 <!-- CONFIG -->
 <div id="t-cfg" class="hidden">
   <div class="panel">
@@ -228,8 +294,9 @@ function fcorta(f){var p=String(f).split("-");return p.length===3?p[2]+"/"+p[1]+
 // ---- pestañas
 document.querySelectorAll("#tabs .tab").forEach(function(b){b.addEventListener("click",function(){
   document.querySelectorAll("#tabs .tab").forEach(function(x){x.classList.remove("active")});b.classList.add("active");
-  ["reg","lista","cfg"].forEach(function(t){$("t-"+t).classList.toggle("hidden",t!==b.dataset.t)});
+  ["reg","lista","ing","cfg"].forEach(function(t){$("t-"+t).classList.toggle("hidden",t!==b.dataset.t)});
   if(b.dataset.t==="lista")renderLista();
+  if(b.dataset.t==="ing")renderIng();
   if(b.dataset.t==="cfg")renderCfg();
 })});
 
@@ -250,7 +317,7 @@ function pintarNombres(){var s=$("nombre"),v=s.value;s.innerHTML="";
   var o=document.createElement("option");o.value="";o.textContent=nombres.length?"Selecciona…":"(agrega habilitadores en Config)";s.appendChild(o);
   nombres.forEach(function(n){var x=document.createElement("option");x.value=n;x.textContent=n;s.appendChild(x)});s.value=v;
   var fs=$("fNombre"),fv=fs.value;fs.innerHTML='<option value="">Todos</option>';
-  nombres.forEach(function(n){var x=document.createElement("option");x.value=n;x.textContent=n;fs.appendChild(x)});fs.value=fv}
+  nombres.forEach(function(n){var x=document.createElement("option");x.value=n;x.textContent=n;fs.appendChild(x)});fs.value=fv;pintarNombresIng()}
 
 // ---- OP autocompletado
 var sug=$("sug");
@@ -522,11 +589,113 @@ function imprimir(){var rs=filtrados();if(!rs.length){toast("error","Nada que im
   setTimeout(function(){fr.contentWindow.focus();fr.contentWindow.print();setTimeout(function(){fr.remove()},2000)},300)}
 $("imp").addEventListener("click",imprimir);
 
+// ---- Ingresos a almacén (registro aparte: línea por línea, sin sumar)
+var K_ING="ctrl_ingresos",ingresos=[],iTurno="Día",iEmp="caja",iModelo=-1,iOpAplicada="";
+function iCalc(){var t=(parseInt($("iU").value,10)||0)*(parseInt($("iC").value,10)||0);$("iT").textContent=t;return t}
+function iEtiq(){var u=$("iU").parentNode.querySelector("label"),c=$("iC").parentNode.querySelector("label");u.textContent="Unid. x "+iEmp;c.textContent="Cant. "+(iEmp==="caja"?"cajas":"paquetes")}
+function iSes(){sv("ctrl_ses_ing",{fecha:$("iFecha").value,turno:iTurno,nombre:$("iNombre").value,dia:hoy()})}
+function pintarNombresIng(){[["iNombre",false],["iFNombre",true]].forEach(function(par){var s=$(par[0]),v=s.value;s.innerHTML="";
+  var o0=document.createElement("option");o0.value="";o0.textContent=par[1]?"Todos":(nombres.length?"Selecciona…":"(agrega habilitadores en Config)");s.appendChild(o0);
+  nombres.forEach(function(n){var x=document.createElement("option");x.value=n;x.textContent=n;s.appendChild(x)});s.value=v})}
+grupo("iTurno",function(v){iTurno=v;iSes()});
+grupo("iEmpTipo",function(v){iEmp=v;iEtiq()});
+$("iU").addEventListener("input",iCalc);$("iC").addEventListener("input",iCalc);
+$("iFecha").addEventListener("change",iSes);$("iNombre").addEventListener("change",iSes);
+function iPintarModelos(m){var c=$("iModelos");c.innerHTML="";if(!m||m.modelos.length<2){c.classList.add("hidden");return}
+  m.modelos.forEach(function(mo,i){var b=document.createElement("button");b.type="button";b.className="chip"+(i===iModelo?" active":"");b.style.flex="0 0 auto";b.textContent=mo.modelo||mo.descripcion;
+    b.addEventListener("click",function(){iModelo=i;$("iDesc").value=mo.descripcion;$("iSap").value=mo.sap||"";iPintarModelos(m)});c.appendChild(b)});
+  c.classList.remove("hidden")}
+function iAplicar(m){iOpAplicada=m.op;$("iOp").value=m.op;$("iCliente").value=m.cliente||"";iModelo=-1;$("iSug").classList.add("hidden");
+  if(m.modelos.length===1){$("iDesc").value=m.modelos[0].descripcion;$("iSap").value=m.modelos[0].sap||""}else{$("iDesc").value="";$("iSap").value=""}
+  iPintarModelos(m)}
+function iSugerir(){var sg=$("iSug"),q=$("iOp").value.trim().toLowerCase();if(!q){sg.classList.add("hidden");return}
+  var r=catalogo.filter(function(c){return c.op.toLowerCase().indexOf(q)!==-1}).slice(0,8);if(!r.length){sg.classList.add("hidden");return}
+  sg.innerHTML="";r.forEach(function(m){var b=document.createElement("button");b.innerHTML='<div class="o mono">'+esc(m.op)+'</div><div class="m">'+esc(m.descripcion)+' · '+esc(m.cliente)+'</div>';
+    b.addEventListener("mousedown",function(e){e.preventDefault();iAplicar(m)});b.addEventListener("touchstart",function(e){e.preventDefault();iAplicar(m)},{passive:false});sg.appendChild(b)});
+  sg.classList.remove("hidden")}
+$("iOp").addEventListener("input",function(){iSugerir();var m=buscar($("iOp").value);
+  if(m){if(iOpAplicada!==m.op)iAplicar(m)}else if(iOpAplicada){iOpAplicada="";iModelo=-1;iPintarModelos(null);$("iDesc").value="";$("iSap").value="";$("iCliente").value=""}});
+$("iOp").addEventListener("focus",iSugerir);
+$("iOp").addEventListener("blur",function(){setTimeout(function(){$("iSug").classList.add("hidden")},150)});
+
+$("iGuardar").addEventListener("click",function(){
+  if(!$("iFecha").value){toast("error","Pon la fecha");return}
+  if(!$("iNombre").value){toast("error","Selecciona el habilitador");return}
+  if(!$("iOp").value.trim()){toast("error","Ingresa la OP");return}
+  var m=buscar($("iOp").value);if(m&&m.modelos.length>1&&iModelo<0){toast("error","Elige el modelo de la OP");return}
+  if(!(iCalc()>0)){toast("error","Ingresa unidades y cantidad");return}
+  var r={id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("iFecha").value,turno:iTurno,nombre:$("iNombre").value,op:$("iOp").value.trim(),sap:$("iSap").value.trim(),descripcion:$("iDesc").value.trim(),cliente:$("iCliente").value.trim(),empaque:iEmp,u:parseInt($("iU").value,10)||0,c:parseInt($("iC").value,10)||0,creado:new Date().toISOString(),sync:false};
+  r.total=r.u*r.c;
+  ingresos.unshift(r);sv(K_ING,ingresos);enviarIng([r]);
+  ["iU","iC"].forEach(function(i){$(i).value=""});iCalc();
+  if(m&&m.modelos.length>1){iModelo=-1;$("iDesc").value="";$("iSap").value="";iPintarModelos(m);toast("ok","Guardado. Elige el siguiente modelo de "+m.op)}
+  else{["iOp","iDesc","iSap","iCliente"].forEach(function(i){$(i).value=""});iOpAplicada="";iPintarModelos(null);toast("ok","Ingreso guardado")}
+  renderIng()});
+
+function iFiltrados(){var f=$("iFFecha").value,tu=$("iFTurno").value,nm=$("iFNombre").value,t=$("iFTexto").value.trim().toLowerCase();
+  return ingresos.filter(function(r){if(f&&r.fecha!==f)return false;if(tu&&r.turno!==tu)return false;if(nm&&r.nombre!==nm)return false;
+    if(t&&(r.op+" "+(r.sap||"")+" "+r.cliente+" "+r.nombre+" "+r.descripcion).toLowerCase().indexOf(t)===-1)return false;return true})
+    .sort(function(a,b){return a.fecha<b.fecha?1:a.fecha>b.fecha?-1:(a.turno===b.turno?String(a.creado).localeCompare(String(b.creado)):(a.turno==="Día"?-1:1))})}
+function renderIng(){var c=$("iLista");c.innerHTML="";var rs=iFiltrados();$("iCuenta").textContent=rs.length+" ingreso(s)";
+  if(!rs.length){c.innerHTML='<div class="empty">Sin ingresos.</div>';return}
+  rs.forEach(function(r){var d=document.createElement("div");d.className="card";
+    d.innerHTML='<div class="top"><div><span class="op mono">'+esc(r.op)+'</span> <span style="font-size:.72rem;color:var(--muted)">'+esc(r.cliente)+'</span></div></div>'
+      +'<div style="font-size:.88rem;margin:4px 0 2px">'+esc(r.descripcion)+(r.sap?' <span class="mono" style="font-size:.72rem;color:var(--muted)">SAP '+esc(r.sap)+'</span>':'')+'</div>'
+      +'<div class="meta">'+fcorta(r.fecha)+' · '+esc(r.turno)+' · '+esc(r.nombre)+(r.sync?' · ☁️':' · ⏳')+'</div>'
+      +'<div class="meta">Ingreso: '+qtxt(r.empaque,r.c,r.u,r.total)+'</div>';
+    var bar=document.createElement("div");bar.style.cssText="display:flex;margin-top:8px;justify-content:flex-end";
+    var del=document.createElement("button");del.className="del";del.textContent="Borrar";
+    del.addEventListener("click",function(){if(!confirm("¿Borrar este ingreso?"))return;ingresos=ingresos.filter(function(x){return x.id!==r.id});sv(K_ING,ingresos);borrarIng(r.id);renderIng()});
+    bar.appendChild(del);d.appendChild(bar);c.appendChild(d)})}
+["iFFecha","iFTurno","iFNombre","iFTexto"].forEach(function(i){$(i).addEventListener("input",renderIng)});
+$("iLimpiar").addEventListener("click",function(){$("iFFecha").value="";$("iFTurno").value="";$("iFNombre").value="";$("iFTexto").value="";renderIng()});
+
+// Sheets (hoja "Ingresos")
+function enviarIng(rs,msg){if(!rs.length)return Promise.resolve();
+  return llamar({action:"upsert",tabla:"ingresos",records:rs}).then(function(){rs.forEach(function(r){r.sync=true});sv(K_ING,ingresos);renderIng();if(msg)toast("ok","Enviado a Sheets ("+rs.length+")")})
+    .catch(function(e){if(msg||navigator.onLine)toast("error","Sheets: "+String(e.message).slice(0,120))})}
+function pendIng(){return ingresos.filter(function(r){return !r.sync})}
+function borrarIng(id){llamar({action:"delete",tabla:"ingresos",id:id}).catch(function(){})}
+$("iEnv").addEventListener("click",function(){var p=pendIng();if(!p.length){toast("ok","Todo está sincronizado");return}enviarIng(p,true)});
+$("iTraer").addEventListener("click",function(){
+  llamar({action:"list",tabla:"ingresos"}).then(function(j){var n=0;
+    (j.records||[]).forEach(function(x){
+      ["u","c","total"].forEach(function(k){x[k]=num(x[k])});
+      ["id","fecha","turno","nombre","op","sap","descripcion","cliente","empaque","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});
+      x.sync=true;var i=ingresos.findIndex(function(r){return r.id===x.id});
+      if(i===-1){ingresos.push(x);n++}else if(ingresos[i].sync){ingresos[i]=x}
+      if(x.nombre&&nombres.indexOf(x.nombre)===-1)nombres.push(x.nombre)});
+    nombres.sort(function(a,b){return a.localeCompare(b,"es",{sensitivity:"base"})});sv(K_NOM,nombres);sv(K_ING,ingresos);pintarNombres();renderIng();
+    toast("ok",n+" ingreso(s) nuevos traídos")}).catch(function(e){toast("error","No se pudo traer: "+String(e.message).slice(0,60))})});
+
+// Excel (tabla simple, sin sumas)
+function xmlIngresos(rs){
+  var r1=[filaT("INGRESOS AL ALMACÉN",8),filaH(["FECHA","TURNO","HABILITADOR","OP","SAP","DESCRIPCIÓN","CLIENTE","ENTREGADO","DETALLE"])];
+  rs.forEach(function(r){r1.push('<Row>'+ce(fcorta(r.fecha),"sK")+ce(r.turno,"sK")+ce(r.nombre,"sC")+ce(r.op,"sK")+ce(r.sap||"","sK")+ce(r.descripcion,"sC")+ce(r.cliente,"sC")+ce(r.total||0,"sE",true)+ce(detalle(r),"sK")+'</Row>')});
+  return '<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" xmlns:html="http://www.w3.org/TR/REC-html40">'
+    +ESTILOS+hojaXml("Ingresos",[85,60,115,85,85,280,160,95,130],r1)+'</Workbook>'}
+function guardarXls(xml,nombre){var mime="application/vnd.ms-excel";
+  try{var blob=new Blob(["\ufeff",xml],{type:mime});var done=false;
+    if(navigator.canShare&&window.File){try{var f=new File([blob],nombre,{type:mime});if(navigator.canShare({files:[f]})){navigator.share({files:[f],title:nombre}).then(function(){toast("ok","Excel exportado")}).catch(function(e){if(e&&e.name!=="AbortError")descargar(blob,nombre)});done=true}}catch(e){}}
+    if(!done)descargar(blob,nombre)}catch(e){toast("error","No se pudo exportar")}}
+$("iExp").addEventListener("click",function(){var rs=iFiltrados();if(!rs.length){toast("error","Nada que exportar");return}guardarXls(xmlIngresos(rs),"ingresos_"+hoy()+".xls")});
+$("iImp").addEventListener("click",function(){var rs=iFiltrados();if(!rs.length){toast("error","Nada que imprimir");return}
+  var filas=rs.map(function(r){return "<tr><td class='k'>"+fcorta(r.fecha)+"</td><td class='k'>"+esc(r.turno)+"</td><td>"+esc(r.nombre)+"</td><td class='k'>"+esc(r.op)+"</td><td class='k'>"+esc(r.sap||"")+"</td><td>"+esc(r.descripcion)+"</td><td>"+esc(r.cliente)+"</td><td class='n e'>"+(r.total||0)+"</td><td class='k'>"+esc(detalle(r))+"</td></tr>"}).join("");
+  var html="<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>Ingresos a almacén</title><style>@page{size:A4 landscape;margin:10mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;font-size:10px;color:#111}h1{font-size:15px;margin:0 0 6px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #888;padding:3px 5px;text-align:left}th{background:#F2A93B;text-align:center}.k{text-align:center}.n{text-align:right;font-weight:700;white-space:nowrap}.e{background:#E6F4EA}</style></head><body><h1>Ingresos al almacén</h1><table><thead><tr><th>Fecha</th><th>Turno</th><th>Habilitador</th><th>OP</th><th>SAP</th><th>Descripción</th><th>Cliente</th><th>Entregado</th><th>Detalle</th></tr></thead><tbody>"+filas+"</tbody></table></body></html>";
+  var fr=document.createElement("iframe");fr.style.cssText="position:fixed;right:0;bottom:0;width:0;height:0;border:0";document.body.appendChild(fr);
+  var d=fr.contentWindow.document;d.open();d.write(html);d.close();
+  setTimeout(function(){fr.contentWindow.focus();fr.contentWindow.print();setTimeout(function(){fr.remove()},2000)},300)});
+function iInit(){ingresos=ld(K_ING,[]);$("iFecha").value=hoy();var s0=ld("ctrl_ses_ing",null);
+  if(s0){if(s0.dia===hoy()&&s0.fecha)$("iFecha").value=s0.fecha;
+    if(s0.turno){iTurno=s0.turno;document.querySelectorAll("#iTurno .chip").forEach(function(c){c.classList.toggle("active",c.dataset.v===iTurno)})}
+    if(s0.nombre&&nombres.indexOf(s0.nombre)!==-1)$("iNombre").value=s0.nombre}
+  iEtiq();renderIng()}
+
 // ---- init
 catalogo=ld(K_CAT,[]);catalogo.forEach(function(c){if(!c.modelos)c.modelos=[{descripcion:c.descripcion||"",sap:c.sap||""}]});nombres=ld(K_NOM,[]);registros=ld(K_REG,[]);registros.forEach(function(r){if(!r.mov&&r.total===undefined){var e=(r.entTotal||0)>0;r.mov=e?"Entregado":"Por entregar";r.empaque=e?r.entTipo:r.porTipo;r.u=e?r.entU:r.porU;r.c=e?r.entC:r.porC;r.total=e?r.entTotal:r.porTotal;r.estado=r.estado||""}});registros.forEach(function(r){if(r.pedido===undefined){if(r.mov==="Por entregar"){r.pedido=r.total||0;r.total=0;r.u=0;r.c=0}else r.pedido=0}});registros.forEach(function(r){if(!r.fdesp)r.fdesp=r.fecha});
-$("fecha").value=hoy();$("fdesp").value=hoy();pintarNombres();restaurarSesion();(function(){var o={};registros.forEach(function(r){o[r.op.toLowerCase()+"|"+r.fdesp]=r});Object.keys(o).forEach(function(k){recalcularEstados(o[k].op,o[k].fdesp)});sv(K_REG,registros)})();etiquetas();
-if(navigator.onLine)setTimeout(function(){actualizarCat(true);enviar(pendientes())},500);
-window.addEventListener("online",function(){enviar(pendientes())});
+$("fecha").value=hoy();$("fdesp").value=hoy();pintarNombres();restaurarSesion();iInit();(function(){var o={};registros.forEach(function(r){o[r.op.toLowerCase()+"|"+r.fdesp]=r});Object.keys(o).forEach(function(k){recalcularEstados(o[k].op,o[k].fdesp)});sv(K_REG,registros)})();etiquetas();
+if(navigator.onLine)setTimeout(function(){actualizarCat(true);enviar(pendientes());enviarIng(pendIng())},500);
+window.addEventListener("online",function(){enviar(pendientes());enviarIng(pendIng())});
 if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})})}
 })();
 </script>

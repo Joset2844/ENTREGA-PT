@@ -1,22 +1,35 @@
 // Apps Script del libro de Google Sheets "Control de Entregas"
 // Extensiones > Apps Script > pega este código > Implementar > Aplicación web
 // Ejecutar como: Yo · Quién tiene acceso: Cualquier persona
-var TOKEN = 'CAMBIA-ESTE-TOKEN';
-var HOJA  = 'Entregas';
-var COLS = ['id','fecha','fdesp','turno','nombre','op','sap','descripcion','cliente','pedido','empaque','u','c','total','estado','creado'];
-var HEAD = ['ID','Fecha registro','Fecha despacho','Turno','Habilitador','OP','SAP','Descripción','Cliente','Cantidad pedida','Empaque (entrega)','Unid x empaque','Cant. empaques','Total entregado','Estado','Creado'];
+// Si cambias este código: Implementar > Administrar implementaciones > Nueva versión
+var TOKEN = '123456';
 
-function hoja_() {
+// Dos tablas en el mismo libro: despachos ("Entregas") e ingresos a almacén ("Ingresos")
+var TABLAS = {
+  entregas: {
+    hoja: 'Entregas',
+    texto: ['A:C', 'F:G'],
+    cols: ['id','fecha','fdesp','turno','nombre','op','sap','descripcion','cliente','pedido','empaque','u','c','total','estado','creado'],
+    head: ['ID','Fecha registro','Fecha despacho','Turno','Habilitador','OP','SAP','Descripción','Cliente','Cantidad pedida','Empaque (entrega)','Unid x empaque','Cant. empaques','Total entregado','Estado','Creado']
+  },
+  ingresos: {
+    hoja: 'Ingresos',
+    texto: ['A:B', 'E:F'],
+    cols: ['id','fecha','turno','nombre','op','sap','descripcion','cliente','empaque','u','c','total','creado'],
+    head: ['ID','Fecha','Turno','Habilitador','OP','SAP','Descripción','Cliente','Empaque','Unid x empaque','Cant. empaques','Total ingresado','Creado']
+  }
+};
+
+function hoja_(T) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) throw new Error('Crea el script desde el libro: Extensiones > Apps Script');
-  var sh = ss.getSheetByName(HOJA);
+  var sh = ss.getSheetByName(T.hoja);
   if (!sh) {
-    sh = ss.insertSheet(HOJA);
-    sh.getRange('A:C').setNumberFormat('@');
-    sh.getRange('F:G').setNumberFormat('@');
-    sh.appendRow(HEAD);
+    sh = ss.insertSheet(T.hoja);
+    T.texto.forEach(function (r) { sh.getRange(r).setNumberFormat('@'); });
+    sh.appendRow(T.head);
     sh.setFrozenRows(1);
-    sh.getRange(1, 1, 1, HEAD.length).setFontWeight('bold').setBackground('#F2A93B');
+    sh.getRange(1, 1, 1, T.head.length).setFontWeight('bold').setBackground('#F2A93B');
   }
   return sh;
 }
@@ -30,8 +43,11 @@ function doPost(e) {
   try {
     var p = JSON.parse(e.postData.contents);
     if (p.token !== TOKEN) return out_({ ok: false, error: 'Token incorrecto' });
+    var T = TABLAS[p.tabla || 'entregas'];
+    if (!T) return out_({ ok: false, error: 'Tabla desconocida' });
     lock.waitLock(20000);
-    var sh = hoja_();
+    var sh = hoja_(T);
+    var COLS = T.cols;
     var n = sh.getLastRow() - 1;
     var ids = n > 0 ? sh.getRange(2, 1, n, 1).getValues().map(function (r) { return String(r[0]); }) : [];
 
@@ -56,7 +72,7 @@ function doPost(e) {
         var o = {};
         COLS.forEach(function (c, k) {
           var v = row[k];
-          if (v instanceof Date) v = Utilities.formatDate(v, tz, c === 'fecha' ? 'yyyy-MM-dd' : "yyyy-MM-dd'T'HH:mm:ss");
+          if (v instanceof Date) v = Utilities.formatDate(v, tz, (c === 'fecha' || c === 'fdesp') ? 'yyyy-MM-dd' : "yyyy-MM-dd'T'HH:mm:ss");
           o[c] = v;
         });
         return o;
