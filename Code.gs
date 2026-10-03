@@ -3,8 +3,8 @@
 // Ejecutar como: Yo · Quién tiene acceso: Cualquier persona
 var TOKEN = 'CAMBIA-ESTE-TOKEN';
 var HOJA  = 'Entregas';
-var COLS = ['id','fecha','turno','nombre','op','sap','descripcion','cliente','mov','empaque','u','c','total','estado','creado'];
-var HEAD = ['ID','Fecha','Turno','Habilitador','OP','SAP','Descripción','Cliente','Tipo (Entregado / Por entregar)','Empaque','Unid x empaque','Cant. empaques','Total unidades','Estado','Creado'];
+var COLS = ['id','fecha','turno','nombre','op','sap','descripcion','cliente','pedido','empaque','u','c','total','estado','creado'];
+var HEAD = ['ID','Fecha','Turno','Habilitador','OP','SAP','Descripción','Cliente','Cantidad pedida','Empaque (entrega)','Unid x empaque','Cant. empaques','Total entregado','Estado','Creado'];
 
 function hoja_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
