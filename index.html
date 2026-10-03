@@ -501,7 +501,7 @@ function num(v){return parseInt(v,10)||0}
 function traer(){if(!cfgSb().url){toast("error","Configura la conexión a Sheets");return}
   llamar({action:"list"}).then(function(j){var n=0;
     (j.records||[]).forEach(function(x){
-      ["pedido","u","c","total"].forEach(function(k){x[k]=num(x[k])});x.sync=true;x.sap=String(x.sap==null?"":x.sap);
+      ["pedido","u","c","total"].forEach(function(k){x[k]=num(x[k])});x.sync=true;["id","fecha","turno","nombre","op","sap","descripcion","cliente","empaque","estado","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});
       var i=registros.findIndex(function(r){return r.id===x.id});
       if(i===-1){registros.push(x);n++}else if(registros[i].sync){registros[i]=x}
       if(x.nombre&&nombres.indexOf(x.nombre)===-1){nombres.push(x.nombre)}
