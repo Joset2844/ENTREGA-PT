@@ -3,8 +3,8 @@
 // Ejecutar como: Yo · Quién tiene acceso: Cualquier persona
 var TOKEN = 'CAMBIA-ESTE-TOKEN';
 var HOJA  = 'Entregas';
-var COLS = ['id','fecha','turno','nombre','op','sap','descripcion','cliente','pedido','empaque','u','c','total','estado','creado'];
-var HEAD = ['ID','Fecha','Turno','Habilitador','OP','SAP','Descripción','Cliente','Cantidad pedida','Empaque (entrega)','Unid x empaque','Cant. empaques','Total entregado','Estado','Creado'];
+var COLS = ['id','fecha','fdesp','turno','nombre','op','sap','descripcion','cliente','pedido','empaque','u','c','total','estado','creado'];
+var HEAD = ['ID','Fecha registro','Fecha despacho','Turno','Habilitador','OP','SAP','Descripción','Cliente','Cantidad pedida','Empaque (entrega)','Unid x empaque','Cant. empaques','Total entregado','Estado','Creado'];
 
 function hoja_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -12,8 +12,8 @@ function hoja_() {
   var sh = ss.getSheetByName(HOJA);
   if (!sh) {
     sh = ss.insertSheet(HOJA);
-    sh.getRange('A:B').setNumberFormat('@');
-    sh.getRange('F:F').setNumberFormat('@');
+    sh.getRange('A:C').setNumberFormat('@');
+    sh.getRange('F:G').setNumberFormat('@');
     sh.appendRow(HEAD);
     sh.setFrozenRows(1);
     sh.getRange(1, 1, 1, HEAD.length).setFontWeight('bold').setBackground('#F2A93B');
