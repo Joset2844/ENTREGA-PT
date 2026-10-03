@@ -8,6 +8,7 @@ var HEAD = ['ID','Fecha','Turno','Habilitador','OP','SAP','Descripción','Client
 
 function hoja_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('Crea el script desde el libro: Extensiones > Apps Script');
   var sh = ss.getSheetByName(HOJA);
   if (!sh) {
     sh = ss.insertSheet(HOJA);

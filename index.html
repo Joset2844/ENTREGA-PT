@@ -192,6 +192,7 @@ input[type=date]{-webkit-appearance:none;appearance:none}
     <div class="field"><label>URL de la Web App (Apps Script)</label><input type="text" id="sbUrl" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off"/></div>
     <div class="field"><label>Token</label><input type="text" id="sbTok" autocomplete="off"/></div>
     <button class="btn sec2" id="sbGuardar">Guardar conexión</button>
+    <button class="btn sec2" id="sbProbar" style="margin-top:8px">Probar conexión</button>
     <p id="sbInfo" style="font-size:.72rem;color:var(--muted);margin:8px 0 0"></p>
   </div>
   <div class="panel">
@@ -422,12 +423,15 @@ $("actCat").addEventListener("dblclick",function(){var a="",b="";try{a=localStor
 var K_SB="ctrl_sheets_url",K_TOK="ctrl_sheets_token";
 var DEFAULT_SB_URL="https://script.google.com/macros/s/AKfycbyGl0Z5bhefLY8ZC4rf2IH1wXqtkKZYBsfo6CvXeXwI5W1vrataEqa9M5NnT84iDSw2hQ/exec",DEFAULT_SB_TOKEN="123456";
 function cfgSb(){var u=DEFAULT_SB_URL,t=DEFAULT_SB_TOKEN;try{u=localStorage.getItem(K_SB)||DEFAULT_SB_URL;t=localStorage.getItem(K_TOK)||DEFAULT_SB_TOKEN}catch(e){}return{url:u,token:t}}
-function llamar(payload){var c=cfgSb();if(!c.url)return Promise.reject(new Error("sin URL"));payload.token=c.token;
+function llamar(payload){var c=cfgSb();if(!c.url)return Promise.reject(new Error("Sin URL configurada"));payload.token=c.token;
   return fetch(c.url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)})
-    .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||"error");return j})}
+    .catch(function(){throw new Error("No se pudo conectar. Revisa internet y que el acceso del script sea 'Cualquier persona'")})
+    .then(function(r){return r.text()})
+    .then(function(t){var j;try{j=JSON.parse(t)}catch(e){throw new Error("El script no devolvió datos válidos. Implementa una NUEVA VERSIÓN con acceso 'Cualquier persona'")}
+      if(!j.ok)throw new Error(j.error||"Error del script");return j})}
 function enviar(rs,msg){if(!cfgSb().url||!rs.length)return Promise.resolve();
   return llamar({action:"upsert",records:rs}).then(function(){rs.forEach(function(r){r.sync=true});sv(K_REG,registros);renderLista();if(msg)toast("ok","Enviado a Sheets ("+rs.length+")")})
-    .catch(function(e){if(msg)toast("error","No se envió: "+String(e.message).slice(0,60))})}
+    .catch(function(e){if(msg||navigator.onLine)toast("error","Sheets: "+String(e.message).slice(0,120))})}
 function borrarRemoto(id){if(cfgSb().url)llamar({action:"delete",id:id}).catch(function(){})}
 function pendientes(){return registros.filter(function(r){return !r.sync})}
 function num(v){return parseInt(v,10)||0}
@@ -448,6 +452,9 @@ $("sbGuardar").addEventListener("click",function(){var u=$("sbUrl").value.trim()
   try{localStorage.setItem(K_SB,u);localStorage.setItem(K_TOK,t)}catch(e){}
   $("sbInfo").textContent=u?"Conexión guardada. Pendientes: "+pendientes().length:"Sin conexión configurada";
   toast("ok","Conexión guardada");if(u&&pendientes().length)enviar(pendientes(),true)});
+$("sbProbar").addEventListener("click",function(){var i=$("sbInfo");i.textContent="Probando…";
+  llamar({action:"list"}).then(function(j){i.textContent="✅ Conectado. Filas en la hoja: "+(j.records||[]).length;toast("ok","Conexión correcta")})
+    .catch(function(e){i.textContent="❌ "+e.message;toast("error",String(e.message).slice(0,120))})});
 function initSb(){var c=cfgSb();$("sbUrl").value=c.url;$("sbTok").value=c.token;
   $("sbInfo").textContent=c.url?"Conectado. Pendientes de enviar: "+pendientes().length:"Sin conexión configurada"}
 
