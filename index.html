@@ -12,6 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Entregas" />
+<script>window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.__ip=e;var b=document.getElementById("btnInstalar");if(b)b.classList.remove("hidden")})</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
@@ -114,7 +115,8 @@ input[type=date]{-webkit-appearance:none;appearance:none}
 </style>
 </head>
 <body>
-<header><div class="wrap">
+<header>
+  <button class="btn-s hidden" id="btnInstalar" style="position:absolute;right:max(16px,env(safe-area-inset-right));top:calc(6px + env(safe-area-inset-top));background:var(--amber);color:#12161F;border:none;min-height:34px;padding:6px 14px">Instalar app</button><div class="wrap">
   <h1>Control de Entregas</h1>
   <div class="tabs" id="tabs">
     <button class="tab active" data-t="reg">Registrar</button>
@@ -260,6 +262,11 @@ input[type=date]{-webkit-appearance:none;appearance:none}
     <div id="nombresLista" style="margin-top:10px"></div>
   </div>
   <div class="panel">
+    <div class="sec">Instalación de la app (PWA)</div>
+    <div id="pwaDiag" style="font-size:.78rem;color:var(--muted2);line-height:1.35"></div>
+    <button class="btn-s" id="pwaRevisar" style="margin-top:8px">Revisar de nuevo</button>
+  </div>
+  <div class="panel">
     <div class="sec">Catálogo de OP</div>
     <p id="catInfo" style="font-size:.78rem;color:var(--muted);margin:0 0 8px"></p>
     <div class="tools">
@@ -297,7 +304,7 @@ document.querySelectorAll("#tabs .tab").forEach(function(b){b.addEventListener("
   ["reg","lista","ing","cfg"].forEach(function(t){$("t-"+t).classList.toggle("hidden",t!==b.dataset.t)});
   if(b.dataset.t==="lista")renderLista();
   if(b.dataset.t==="ing")renderIng();
-  if(b.dataset.t==="cfg")renderCfg();
+  if(b.dataset.t==="cfg"){renderCfg();diagPwa()}
 })});
 
 // ---- chips
@@ -691,12 +698,43 @@ function iInit(){ingresos=ld(K_ING,[]);$("iFecha").value=hoy();var s0=ld("ctrl_s
     if(s0.nombre&&nombres.indexOf(s0.nombre)!==-1)$("iNombre").value=s0.nombre}
   iEtiq();renderIng()}
 
+// ---- Instalación PWA: botón y diagnóstico
+$("btnInstalar").addEventListener("click",function(){var e=window.__ip;if(!e)return;e.prompt();e.userChoice.then(function(){window.__ip=null;$("btnInstalar").classList.add("hidden")})});
+window.addEventListener("appinstalled",function(){window.__ip=null;$("btnInstalar").classList.add("hidden");toast("ok","App instalada")});
+if(window.__ip)$("btnInstalar").classList.remove("hidden");
+function diagPwa(){var out=$("pwaDiag"),L=[];
+  function add(ok,t){L.push('<div style="margin:3px 0">'+(ok===null?'ℹ️':ok?'✅':'❌')+' '+esc(t)+'</div>');out.innerHTML=L.join("")}
+  var ua=navigator.userAgent,seguro=location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1";
+  add(seguro,seguro?"Conexión segura ("+location.protocol+"//"+location.host+")":"La página NO está en HTTPS ("+location.protocol+"//"+location.host+"). Sin HTTPS no se puede instalar: súbela a un hosting con HTTPS y ábrela desde su link.");
+  if(/FBAN|FBAV|Instagram|WhatsApp|Line\/|; wv\)/.test(ua))add(false,"Estás en un navegador interno (WhatsApp, Facebook, etc.). Abre el link en Chrome (Android) o Safari (iPhone).");
+  var standalone=window.matchMedia("(display-mode: standalone)").matches||navigator.standalone;
+  add(null,standalone?"Ya estás usando la app instalada.":"Se está usando en el navegador (no instalada).");
+  var link=document.querySelector('link[rel="manifest"]');
+  if(!link){add(false,"Falta el enlace al manifest en index.html")}
+  else{fetch(link.href,{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);var ct=r.headers.get("content-type")||"";return r.json().then(function(m){return{m:m,ct:ct}})}).then(function(x){var m=x.m;
+      add(true,"manifest.json cargado ("+(x.ct||"sin tipo")+")");
+      add(!!(m.name||m.short_name)&&!!m.start_url&&/standalone|fullscreen|minimal-ui/.test(m.display||""),"Manifest con nombre, start_url y display standalone");
+      (m.icons||[]).forEach(function(ic){var img=new Image();
+        img.onload=function(){var esp=String(ic.sizes||"").split("x")[0],ok=String(img.naturalWidth)===esp&&img.naturalWidth===img.naturalHeight;add(ok,"Ícono "+ic.src+": mide "+img.naturalWidth+"×"+img.naturalHeight+(ok?"":" y el manifest dice "+ic.sizes+" → deben coincidir"))};
+        img.onerror=function(){add(false,"No carga el ícono "+ic.src+" (revisa que exista en la carpeta icons y que el nombre coincida exacto)")};
+        img.src=new URL(ic.src,link.href).href});
+      var tiene=function(n){return(m.icons||[]).some(function(ic){return String(ic.sizes||"").indexOf(n+"x"+n)!==-1})};
+      if(!tiene(192)||!tiene(512))add(false,"El manifest necesita íconos de 192x192 y 512x512")
+    }).catch(function(e){add(false,"No se pudo leer manifest.json: "+e.message+" (debe estar en la misma carpeta que index.html)")})}
+  if(!("serviceWorker" in navigator))add(false,"Este navegador no soporta service worker (¿modo privado o navegador interno?)");
+  else navigator.serviceWorker.getRegistration().then(function(reg){
+    if(reg)add(true,"Service worker registrado ("+(reg.active?"activo":"instalando")+"), alcance: "+reg.scope);
+    else add(false,"Service worker NO registrado"+(window.__swErr?": "+window.__swErr:"")+" (sw.js debe estar en la misma carpeta que index.html)")});
+  add(null,window.__ip?"El navegador permite instalar: usa el botón «Instalar app» de arriba.":"El navegador todavía no ofrece instalar. Si todo lo anterior está en ✅, espera unos segundos y recarga; si ya la instalaste, no aparece.");
+  if(/iPhone|iPad|iPod/.test(ua))add(null,"iPhone/iPad: en Safari toca Compartir → «Agregar a pantalla de inicio». No hay botón de instalar.")}
+$("pwaRevisar").addEventListener("click",diagPwa);
+
 // ---- init
 catalogo=ld(K_CAT,[]);catalogo.forEach(function(c){if(!c.modelos)c.modelos=[{descripcion:c.descripcion||"",sap:c.sap||""}]});nombres=ld(K_NOM,[]);registros=ld(K_REG,[]);registros.forEach(function(r){if(!r.mov&&r.total===undefined){var e=(r.entTotal||0)>0;r.mov=e?"Entregado":"Por entregar";r.empaque=e?r.entTipo:r.porTipo;r.u=e?r.entU:r.porU;r.c=e?r.entC:r.porC;r.total=e?r.entTotal:r.porTotal;r.estado=r.estado||""}});registros.forEach(function(r){if(r.pedido===undefined){if(r.mov==="Por entregar"){r.pedido=r.total||0;r.total=0;r.u=0;r.c=0}else r.pedido=0}});registros.forEach(function(r){if(!r.fdesp)r.fdesp=r.fecha});
 $("fecha").value=hoy();$("fdesp").value=hoy();pintarNombres();restaurarSesion();iInit();(function(){var o={};registros.forEach(function(r){o[r.op.toLowerCase()+"|"+r.fdesp]=r});Object.keys(o).forEach(function(k){recalcularEstados(o[k].op,o[k].fdesp)});sv(K_REG,registros)})();etiquetas();
 if(navigator.onLine)setTimeout(function(){actualizarCat(true);enviar(pendientes());enviarIng(pendIng())},500);
 window.addEventListener("online",function(){enviar(pendientes());enviarIng(pendIng())});
-if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})})}
+if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(e){window.__swErr=String(e&&e.message||e)})})}
 })();
 </script>
 </body>
