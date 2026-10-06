@@ -349,11 +349,13 @@ function buscar(op){var q=(op||"").trim().toLowerCase();return q?catalogo.find(f
 var modeloSel=-1,opAplicada="";
 function pintarModelos(m){var c=$("modelos");c.innerHTML="";if(!m||m.modelos.length<2){c.classList.add("hidden");return}
   m.modelos.forEach(function(mo,i){var b=document.createElement("button");b.type="button";b.className="chip"+(i===modeloSel?" active":"");b.style.flex="0 0 auto";b.textContent=mo.modelo||mo.descripcion;
-    b.addEventListener("click",function(){modeloSel=i;$("desc").value=mo.descripcion;$("sap").value=mo.sap||"";pintarModelos(m)});c.appendChild(b)});
+    b.addEventListener("click",function(){modeloSel=i;$("desc").value=mo.descripcion;$("sap").value=mo.sap||"";pedidoSap();pintarModelos(m)});c.appendChild(b)});
+  var t=document.createElement("button");t.type="button";t.className="chip"+(modeloSel===-2?" active":"");t.style.flex="0 0 auto";t.textContent="Todos juntos";
+  t.addEventListener("click",function(){modeloSel=-2;$("desc").value=m.modelos.map(function(x){return x.descripcion}).join(" + ");$("sap").value=m.modelos.map(function(x){return x.sap||""}).filter(Boolean).join(" + ");pintarModelos(m)});c.insertBefore(t,c.firstChild);
   c.classList.remove("hidden")}
 function aplicar(m){opAplicada=m.op;$("op").value=m.op;$("cliente").value=m.cliente||"";modeloSel=-1;sug.classList.add("hidden");sincronizarPedido();
   if(m.modelos.length===1){$("desc").value=m.modelos[0].descripcion;$("sap").value=m.modelos[0].sap||""}else{$("desc").value="";$("sap").value=""}
-  pintarModelos(m)}
+  pintarModelos(m);pedidoSap()}
 function renderSug(){var q=$("op").value.trim().toLowerCase();if(!q){sug.classList.add("hidden");return}
   var r=catalogo.filter(function(c){return c.op.toLowerCase().indexOf(q)!==-1}).slice(0,8);
   if(!r.length){sug.classList.add("hidden");return}
@@ -373,7 +375,7 @@ $("guardar").addEventListener("click",function(){
   if(!$("fecha").value){toast("error","Pon la fecha de registro");return}
   if(!$("nombre").value){toast("error","Selecciona el habilitador");return}
   if(!$("op").value.trim()){toast("error","Ingresa la OP");return}
-  var mAct=buscar($("op").value);if(mAct&&mAct.modelos.length>1&&modeloSel<0){toast("error","Elige el modelo de la OP");return}
+  var mAct=buscar($("op").value);if(mAct&&mAct.modelos.length>1&&modeloSel===-1){toast("error","Elige el modelo de la OP");return}
   if(!(parseInt($("q-p").value,10)>0)){toast("error","Ingresa la cantidad pedida de la OP");return}
   if(!(calc()>0)){toast("error","Ingresa unidades y cantidad entregada");return}
   var r={id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:$("fdesp").value,turno:turno,nombre:$("nombre").value,
@@ -383,7 +385,7 @@ $("guardar").addEventListener("click",function(){
   var cambiados=[];registros.forEach(function(x){if(x.op.toLowerCase()===r.op.toLowerCase()&&(x.fdesp||"")===r.fdesp&&x.pedido!==r.pedido){x.pedido=r.pedido;x.sync=false;cambiados.push(x)}});
   r.sync=false;registros.unshift(r);var camb2=recalcularEstados(r.op,r.fdesp);var envio=[r];cambiados.concat(camb2).forEach(function(x){if(envio.indexOf(x)===-1)envio.push(x)});sv(K_REG,registros);enviar(envio);
   ["q-u","q-c"].forEach(function(i){$(i).value=""});calc();
-  if(mAct&&mAct.modelos.length>1){modeloSel=-1;$("desc").value="";$("sap").value="";pintarModelos(mAct);toast("ok","Guardado. Elige el siguiente modelo de "+mAct.op);renderDespacho()}
+  if(mAct&&mAct.modelos.length>1&&modeloSel!==-2){modeloSel=-1;$("desc").value="";$("sap").value="";pintarModelos(mAct);toast("ok","Guardado. Elige el siguiente modelo de "+mAct.op);renderDespacho()}
   else{["op","desc","sap","cliente"].forEach(function(i){$(i).value=""});opAplicada="";opPedidoVista="";$("q-p").value="";$("opAcum").textContent="";pintarModelos(null);toast("ok","Entrada guardada");renderDespacho()}
   
 });
@@ -399,14 +401,16 @@ grupo("vistaChips",function(v){vista=v;renderLista()});
 function fdActual(){return $("fdesp").value}
 function ultimoPedido(op,fd){var q=(op||"").trim().toLowerCase();if(!q)return 0;var best=null;registros.forEach(function(x){if(x.op.toLowerCase()===q&&(x.fdesp||"")===(fd||"")&&x.pedido>0&&(!best||String(x.creado)>String(best.creado)))best=x});return best?best.pedido:0}
 function pedidoPlanOp(op,fd){var p=planesOp[fd];if(!p)return 0;var q=(op||"").trim().toUpperCase();for(var i=0;i<p.items.length;i++){if(p.items[i].op.toUpperCase()===q)return p.items[i].cant}return 0}
-function pedidoDe(op,fd){var x=pedidoPlanOp(op,fd);if(x)return x;var u=ultimoPedido(op,fd);if(u)return u;var m=buscar(op);return m&&m.cantidadTotal?(parseInt(m.cantidadTotal,10)||0):0}
+function pedidoPlanSap(sap,fd){var p=planes[fd];if(!p||!sap)return 0;var q=String(sap).trim().toUpperCase();for(var i=0;i<p.items.length;i++){if(p.items[i].sap.toUpperCase()===q)return p.items[i].cant}return 0}
+function pedidoDe(op,fd){var x=pedidoPlanOp(op,fd);if(x)return x;var u=ultimoPedido(op,fd);if(u)return u;if(planesOp[fd]||planes[fd])return 0;var m=buscar(op);return m&&m.cantidadTotal?(parseInt(m.cantidadTotal,10)||0):0}
 function acumulado(op,fd){var q=(op||"").trim().toLowerCase(),t=0;registros.forEach(function(x){if(x.op.toLowerCase()===q&&(x.fdesp||"")===(fd||""))t+=x.total||0});return t}
 function estadoDe(op,fd){var p=pedidoPlanOp(op,fd)||ultimoPedido(op,fd);if(!p)return "";return acumulado(op,fd)>=p?"COMPLETO":"INCOMPLETO"}
 function estadoReg(r){return estadoDe(r.op,r.fdesp)||r.estado||""}
 function badgeEstado(e){return e?'<span class="badge b-'+e+'">'+e+'</span>':''}
 function recalcularEstados(op,fd){var q=op.toLowerCase(),ch=[],e=estadoDe(op,fd);registros.forEach(function(x){if(x.op.toLowerCase()===q&&(x.fdesp||"")===(fd||"")&&x.estado!==e){x.estado=e;x.sync=false;ch.push(x)}});return ch}
 var opPedidoVista="";
-function sincronizarPedido(){var op=$("op").value.trim().toLowerCase();if(op===opPedidoVista)return;opPedidoVista=op;$("q-p").value=pedidoDe(op,fdActual())||"";actualizarOpAcum()}
+function sincronizarPedido(){var op=$("op").value.trim().toLowerCase();if(op===opPedidoVista)return;opPedidoVista=op;$("q-p").value=pedidoDe(op,fdActual())||"";pedidoSap();actualizarOpAcum()}
+function pedidoSap(){var fd=fdActual(),op=$("op").value.trim();if(pedidoPlanOp(op,fd))return;var c=pedidoPlanSap($("sap").value,fd);if(c){$("q-p").value=c;actualizarOpAcum()}}
 function actualizarOpAcum(){var op=$("op").value.trim(),p=parseInt($("q-p").value,10)||0,el=$("opAcum");if(!op||!p){el.textContent="";return}
   var ac=acumulado(op,fdActual()),nu=(parseInt($("q-u").value,10)||0)*(parseInt($("q-c").value,10)||0),pe=p-ac-nu;
   el.textContent="Despacho "+fcorta(fdActual())+" · Ya entregado: "+ac+" u"+(nu?" + esta entrada "+nu+" u":"")+" · "+(pe>=0?"Pendiente: "+pe+" u":"Excede en "+(-pe)+" u")}
@@ -445,26 +449,24 @@ function renderPlan(){var fd=$("fdesp").value,c=$("planRes");c.innerHTML="";var 
   var tp=0,te=0,comp=0;
   var rows=p.items.map(function(it){var k=it.sap.toUpperCase(),e=ent[k]||0,f=it.cant-e;tp+=it.cant;te+=Math.min(e,it.cant);if(f<=0)comp++;
     var cl=f>0?"plan-pend":(f<0?"plan-exc":"plan-ok"),et=f>0?"Falta "+f:(f<0?"Exceso "+(-f):"Completo");
-    var m=buscarSap(it.sap);
-    return "<tr><td class='mono'>"+esc(it.sap)+(m?"<div style='color:var(--muted);font-size:.7rem'>"+esc(m)+"</div>":"")+"</td><td class='n mono'>"+it.cant+"</td><td class='n mono'>"+e+"</td><td class='n "+cl+"'>"+et+"</td></tr>"}).join("");
+    return "<tr><td class='mono'>"+esc(it.sap)+infoSap(it.sap)+"</td><td class='n mono'>"+it.cant+"</td><td class='n mono'>"+e+"</td><td class='n "+cl+"'>"+et+"</td><td>"+btnReg("",it.sap)+"</td></tr>"}).join("");
   var pct=tp?Math.round(te*100/tp):0;
   c.innerHTML="<div class='sec'>Lista de despacho "+fcorta(fd)+" · "+comp+"/"+p.items.length+" SAP completos · "+pct+"%</div>"+
     "<div style='font-size:.7rem;color:var(--muted);margin-bottom:6px'>Archivo: "+esc(p.archivo||"")+"</div>"+
-    "<table class='plan-t'><thead><tr><th>SAP</th><th class='n'>Pedido</th><th class='n'>Entregado</th><th class='n'>Estado</th></tr></thead><tbody>"+rows+"</tbody></table>"}
+    "<table class='plan-t'><thead><tr><th>SAP</th><th class='n'>Pedido</th><th class='n'>Entregado</th><th class='n'>Estado</th><th></th></tr></thead><tbody>"+rows+"</tbody></table>"}
 function buscarSap(sap){var q=String(sap).trim().toUpperCase();for(var i=0;i<catalogo.length;i++){var ms=catalogo[i].modelos||[];for(var j=0;j<ms.length;j++){if(String(ms[j].sap||"").trim().toUpperCase()===q)return ms[j].descripcion||ms[j].desc||""}}
   for(var r=registros.length-1;r>=0;r--){if(String(registros[r].sap||"").trim().toUpperCase()===q)return registros[r].descripcion||""}return ""}
+function hojaSimple(wb){var best=null;wb.SheetNames.forEach(function(n){var a=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:""});var m=0;a.forEach(function(r){var c=r.filter(function(v){return String(v).trim()!==""}).length;if(c>m)m=c});if(a.length&&(!best||(m<=3&&best.m>3)))best={a:a,m:m}});return best?best.a:[]}
 $("planImp").addEventListener("click",function(){if(!$("fdesp").value){toast("error","Primero elige la fecha de despacho");return}$("planFile").click()});
 $("planBorrar").addEventListener("click",function(){var fd=$("fdesp").value;if(!confirm("¿Quitar la lista de despacho del "+fcorta(fd)+"?"))return;delete planes[fd];sv(K_PLAN,planes);renderPlan()});
 $("planFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;var fd=$("fdesp").value;
   var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
-    var a=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""});
+    var a=hojaSimple(wb);
     var hi=-1,cs=-1,cc=-1;for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="sap"||h==="codigo sap"||h==="cod sap"}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;cs=x;cc=y}}
-    if(hi<0){toast("error","El Excel debe tener columnas SAP y CANT");return}
-    var mp={},orden=[];for(var k=hi+1;k<a.length;k++){var sp=String(a[k][cs]).trim();if(!sp)continue;var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp)){mp[key]={sap:sp,cant:0};orden.push(key)}mp[key].cant+=q}
+    if(hi<0){if(a.length){cs=0;cc=1}else{toast("error","El Excel debe tener columnas SAP y CANT");return}}
+    var mp={},orden=[];for(var k=hi+1;k<a.length;k++){var sp=String(a[k][cs]).trim(),qs=String(a[k][cc]).replace(/,/g,"").trim();if(!sp||qs===""||!isFinite(qs))continue;var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp)){mp[key]={sap:sp,cant:0};orden.push(key)}mp[key].cant+=q}
     if(!orden.length){toast("error","No hay filas con SAP");return}
-    if(planes[fd]&&!confirm("Ya hay una lista para el "+fcorta(fd)+". ¿Reemplazarla?"))return;
-    planes[fd]={archivo:f.name,cargado:new Date().toISOString(),items:orden.map(function(k){return mp[k]})};sv(K_PLAN,planes);renderPlan();
-    toast("ok","Lista cargada: "+orden.length+" SAP para el "+fcorta(fd))}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
+     confirmarLista(fd,orden.map(function(k){var it=mp[k],o=opsDeSap(it.sap);var cs=o.length?o.map(function(x){var mo=x.m.modelos[x.i];return {op:x.m.op,cliente:x.m.cliente||"",sap:mo.sap||it.sap,desc:mo.descripcion||""}}):[{op:"",cliente:"",sap:it.sap,desc:buscarSap(it.sap)}];return {cands:cs,cant:it.cant,ok:!!o.length,key:it.sap}}),"SAP")}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
 var K_PLANOP="ctrl_plan_op",planesOp=ld(K_PLANOP,{});
 function renderPlanOp(){var fd=$("fdesp").value,c=$("planOpRes");c.innerHTML="";var p=planesOp[fd];
   $("planOpBorrar").classList.toggle("hidden",!p);if(!p||!p.items.length)return;
@@ -472,12 +474,21 @@ function renderPlanOp(){var fd=$("fdesp").value,c=$("planOpRes");c.innerHTML="";
   var tp=0,te=0,comp=0;
   var rows=p.items.map(function(it){var k=it.op.toUpperCase(),e=ent[k]||0,f=it.cant-e;tp+=it.cant;te+=Math.min(e,it.cant);if(f<=0)comp++;
     var cl=f>0?"plan-pend":(f<0?"plan-exc":"plan-ok"),et=f>0?"Falta "+f:(f<0?"Exceso "+(-f):"Completo");
-    var m=buscarOp(it.op);
-    return "<tr><td class='mono'>"+esc(it.op)+(m?"<div style='color:var(--muted);font-size:.7rem'>"+esc(m)+"</div>":"")+"</td><td class='n mono'>"+it.cant+"</td><td class='n mono'>"+e+"</td><td class='n "+cl+"'>"+et+"</td></tr>"}).join("");
+    return "<tr><td class='mono'>"+esc(it.op)+infoOp(it.op)+"</td><td class='n mono'>"+it.cant+"</td><td class='n mono'>"+e+"</td><td class='n "+cl+"'>"+et+"</td><td>"+btnReg(it.op,"")+"</td></tr>"}).join("");
   var pct=tp?Math.round(te*100/tp):0;
   c.innerHTML="<div class='sec'>Lista por OP "+fcorta(fd)+" \u00b7 "+comp+"/"+p.items.length+" OP completas \u00b7 "+pct+"%</div>"+
     "<div style='font-size:.7rem;color:var(--muted);margin-bottom:6px'>Archivo: "+esc(p.archivo||"")+"</div>"+
-    "<table class='plan-t'><thead><tr><th>OP</th><th class='n'>Pedido</th><th class='n'>Entregado</th><th class='n'>Estado</th></tr></thead><tbody>"+rows+"</tbody></table>"}
+    "<table class='plan-t'><thead><tr><th>OP</th><th class='n'>Pedido</th><th class='n'>Entregado</th><th class='n'>Estado</th><th></th></tr></thead><tbody>"+rows+"</tbody></table>"}
+function opsDeSap(sap){var q=String(sap).trim().toUpperCase(),r=[];catalogo.forEach(function(c){(c.modelos||[]).forEach(function(mo,i){if(String(mo.sap||"").trim().toUpperCase()===q)r.push({m:c,i:i})})});return r}
+function llenarForm(op,sap){var m=op?buscar(op):null;
+  if(!m&&sap){var o=opsDeSap(sap);if(o.length===1){m=o[0].m}else if(o.length>1){toast("error","El SAP "+sap+" está en varias OP: "+o.map(function(x){return x.m.op}).join(", ")+". Escribe la OP.");$("sap").value=sap;$("desc").value=buscarSap(sap);$("op").focus();return}}
+  if(m){aplicar(m);if(sap){var i=(m.modelos||[]).findIndex(function(mo){return String(mo.sap||"").trim().toUpperCase()===String(sap).trim().toUpperCase()});if(i>=0){modeloSel=i;$("desc").value=m.modelos[i].descripcion;$("sap").value=m.modelos[i].sap||"";pintarModelos(m)}}}
+  else{$("op").value=op||"";$("sap").value=sap||"";$("desc").value=sap?buscarSap(sap):"";opPedidoVista="";sincronizarPedido()}
+  pedidoSap();actualizarOpAcum();$("op").scrollIntoView({behavior:"smooth",block:"center"});$("q-u").focus();toast("ok","Datos listos, ingresa unidades y cantidad")}
+document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest("[data-reg]");if(!b)return;llenarForm(b.dataset.op||"",b.dataset.sap||"")});
+function infoOp(op){var m=buscar(op);if(!m)return "<div style='color:var(--red);font-size:.7rem'>No está en la carga de OP de Sheets</div>";return "<div style='color:var(--muted);font-size:.7rem'>"+esc(m.cliente||"")+"</div>"+(m.modelos||[]).map(function(mo){return "<div style='color:var(--muted);font-size:.7rem'>· "+(mo.sap?"SAP "+esc(mo.sap)+" — ":"")+esc(mo.descripcion||"")+"</div>"}).join("")}
+function infoSap(sap){var o=opsDeSap(sap),d=buscarSap(sap);var h=d?"<div style='color:var(--muted);font-size:.7rem'>"+esc(d)+"</div>":"";if(!o.length)return h+"<div style='color:var(--red);font-size:.7rem'>No está en la carga de OP de Sheets</div>";return h+"<div style='color:var(--muted);font-size:.7rem'>OP: "+o.map(function(x){return esc(x.m.op)+(x.m.cliente?" ("+esc(x.m.cliente)+")":"")}).join(", ")+"</div>"}
+function btnReg(op,sap){return "<button type='button' class='btn-s' style='padding:4px 8px;font-size:.72rem' data-reg='1' data-op='"+esc(op||"")+"' data-sap='"+esc(sap||"")+"'>Registrar</button>"}
 function buscarOp(op){var q=String(op).trim().toUpperCase();for(var i=0;i<catalogo.length;i++){if(String(catalogo[i].op||"").trim().toUpperCase()===q){var d=catalogo[i].descripcion||catalogo[i].desc||"";var cl=catalogo[i].cliente||"";return (d+(cl?" \u00b7 "+cl:""))||cl}}
   for(var r=registros.length-1;r>=0;r--){if(String(registros[r].op||"").trim().toUpperCase()===q)return registros[r].descripcion||""}return ""}
 $("planOpImp").addEventListener("click",function(){if(!$("fdesp").value){toast("error","Primero elige la fecha de despacho");return}$("planOpFile").click()});
@@ -500,10 +511,34 @@ $("planOpFile").addEventListener("change",function(e){var f=e.target.files[0];e.
   var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
      var mp=leerListaOp(wb,fd);if(mp===null){toast("error","No encontré una lista con OP y cantidad");return}var orden=Object.keys(mp);
     if(!orden.length){toast("error","No hay filas con OP");return}
-    if(planesOp[fd]&&!confirm("Ya hay una lista por OP para el "+fcorta(fd)+". \u00bfReemplazarla?"))return;
-    planesOp[fd]={archivo:f.name,cargado:new Date().toISOString(),items:orden.map(function(k){return mp[k]})};sv(K_PLANOP,planesOp);renderPlanOp();
-    toast("ok","Lista por OP cargada: "+orden.length+" OP para el "+fcorta(fd))}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
-function renderDespacho(){renderPlan();renderPlanOp();var fd=$("fdesp").value;
+     confirmarLista(fd,orden.map(function(k){var it=mp[k],m=buscar(it.op);var cs=m&&m.modelos.length?m.modelos.map(function(mo){return {op:m.op,cliente:m.cliente||"",sap:mo.sap||"",desc:mo.descripcion||""}}):[{op:it.op,cliente:"",sap:"",desc:""}];return {cands:cs,cant:it.cant,ok:!!m,key:it.op}}),"OP")}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
+var listaConf=null;
+function elegidos(r,v){if(v==="sep")return r.cands.slice();if(v==="all"&&r.cands.length>1){var a=r.cands;return [{op:a[0].op,cliente:a[0].cliente,sap:a.map(function(x){return x.sap}).filter(Boolean).join(" + "),desc:a.map(function(x){return x.desc}).join(" + ")}]}return [r.cands[+v||0]]}
+function confirmarLista(fd,rows,tipo){listaConf={fd:fd,rows:rows};var w=$("confLista");if(!w){w=document.createElement("div");w.id="confLista";w.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;display:flex;align-items:center;justify-content:center;padding:12px";document.body.appendChild(w)}
+  var td="padding:6px;border-bottom:1px solid var(--line,#333);vertical-align:top;font-size:.78rem";
+  var h=rows.map(function(r,i){var c=elegidos(r,tipo==="OP"?"all":"0")[0];var opCell=r.cands.length>1&&tipo==="SAP"?"<select data-cs='"+i+"'>"+r.cands.map(function(x,j){return "<option value='"+j+"'>"+esc(x.op)+"</option>"}).join("")+"</select>":"<span class='mono'>"+esc(c.op||"—")+"</span>";
+    var sapCell=r.cands.length>1&&tipo==="OP"?"<select data-cs='"+i+"'><option value='all'>Todos juntos ("+r.cands.length+")</option><option value='sep'>Separados ("+r.cands.length+" tarjetas)</option>"+r.cands.map(function(x,j){return "<option value='"+j+"'>Solo "+esc(x.sap||x.desc)+"</option>"}).join("")+"</select>":"<span class='mono'>"+esc(c.sap||"—")+"</span>";
+    return "<tr"+(r.ok?"":" style='opacity:.7'")+"><td style='"+td+"'><input type='checkbox' data-ck='"+i+"'"+(r.ok?" checked":"")+"></td><td style='"+td+"'>"+opCell+"</td><td style='"+td+"'>"+sapCell+"</td><td style='"+td+"' data-cl='"+i+"'>"+esc(c.cliente)+"</td><td style='"+td+"' data-de='"+i+"'>"+(r.ok?esc(c.desc):"<span style='color:var(--red)'>"+esc(r.key)+" no está en Sheets</span>")+"</td><td style='"+td+"'><input type='number' data-q='"+i+"' value='"+r.cant+"' style='width:90px'></td></tr>"}).join("");
+  w.innerHTML="<div class='card' style='max-width:900px;width:100%;max-height:90vh;overflow:auto'><div class='sec'>Confirmar despacho "+fcorta(fd)+" · "+rows.length+" fila(s)</div><div style='font-size:.72rem;color:var(--muted);margin-bottom:6px'>Al aceptar se crean las tarjetas con la cantidad pedida y se envían a Sheets. Luego registras las entregas como siempre.</div><table style='width:100%;border-collapse:collapse'><thead><tr><th></th><th style='text-align:left'>OP</th><th style='text-align:left'>SAP</th><th style='text-align:left'>CLIENTE</th><th style='text-align:left'>DESCRIPCIÓN</th><th style='text-align:left'>CANTIDAD</th></tr></thead><tbody>"+h+"</tbody></table><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn-s' id='confNo'>Cancelar</button><button class='btn-s' id='confSi' style='background:var(--acc,#F2A93B);color:#12161F'>Aceptar y enviar</button></div></div>";
+  w.style.display="flex";
+  w.querySelectorAll("[data-cs]").forEach(function(sel){sel.addEventListener("change",function(){var i=+sel.dataset.cs,c=elegidos(rows[i],sel.value)[0];if(sel.value==="sep")c={cliente:rows[i].cands[0].cliente,desc:rows[i].cands.map(function(x){return x.desc}).join(" | ")};w.querySelector("[data-cl='"+i+"']").textContent=c.cliente;w.querySelector("[data-de='"+i+"']").textContent=c.desc})});
+  $("confNo").onclick=function(){w.style.display="none";listaConf=null};
+  $("confSi").onclick=function(){aceptarLista(w)}}
+function aceptarLista(w){var fd=listaConf.fd,rows=listaConf.rows;
+  if(!$("fecha").value){toast("error","Pon la fecha de registro");return}
+  if(!$("nombre").value){toast("error","Selecciona el habilitador");return}
+  var nuevos=[],ops={},sinOp=0;
+  rows.forEach(function(r,i){if(!w.querySelector("[data-ck='"+i+"']").checked)return;var sel=w.querySelector("[data-cs='"+i+"']"),lst=elegidos(r,sel?sel.value:"0"),c=lst[0];var q=parseInt(w.querySelector("[data-q='"+i+"']").value,10)||0;
+    if(!c.op){sinOp++;return}if(!(q>0))return;
+    lst.forEach(function(c){nuevos.push({id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:fd,turno:turno,nombre:$("nombre").value,op:c.op,sap:c.sap,descripcion:c.desc,cliente:c.cliente,pedido:q,empaque:emp,u:0,c:0,total:0,estado:"",creado:new Date().toISOString(),sync:false})});ops[c.op]=1});
+  if(!nuevos.length){toast("error",sinOp?"Las filas marcadas no tienen OP en Sheets":"No hay filas marcadas");return}
+  var envio=nuevos.slice();
+  nuevos.forEach(function(r){registros.forEach(function(x){if(nuevos.indexOf(x)<0&&x.op.toLowerCase()===r.op.toLowerCase()&&(x.fdesp||"")===fd&&x.pedido!==r.pedido){x.pedido=r.pedido;x.sync=false;if(envio.indexOf(x)<0)envio.push(x)}})});
+  nuevos.forEach(function(r){registros.unshift(r)});
+  Object.keys(ops).forEach(function(op){recalcularEstados(op,fd).forEach(function(x){if(envio.indexOf(x)<0)envio.push(x)})});
+  sv(K_REG,registros);w.style.display="none";listaConf=null;renderLista();enviar(envio,true);
+  toast("ok",nuevos.length+" tarjeta(s) creadas para el "+fcorta(fd)+(sinOp?" · "+sinOp+" sin OP omitidas":""))}
+function renderDespacho(){$("planRes").innerHTML="";$("planOpRes").innerHTML="";$("planBorrar").classList.add("hidden");$("planOpBorrar").classList.add("hidden");var fd=$("fdesp").value;
   var sub=registros.filter(function(r){return (r.fdesp||"")===fd});
   var tot=sub.reduce(function(a,r){return a+(r.total||0)},0);
   $("despachoInfo").textContent="Despacho "+fcorta(fd)+": "+sub.length+" entrada(s) · "+tot+" u entregadas";
