@@ -481,13 +481,24 @@ function renderPlanOp(){var fd=$("fdesp").value,c=$("planOpRes");c.innerHTML="";
 function buscarOp(op){var q=String(op).trim().toUpperCase();for(var i=0;i<catalogo.length;i++){if(String(catalogo[i].op||"").trim().toUpperCase()===q){var d=catalogo[i].descripcion||catalogo[i].desc||"";var cl=catalogo[i].cliente||"";return (d+(cl?" \u00b7 "+cl:""))||cl}}
   for(var r=registros.length-1;r>=0;r--){if(String(registros[r].op||"").trim().toUpperCase()===q)return registros[r].descripcion||""}return ""}
 $("planOpImp").addEventListener("click",function(){if(!$("fdesp").value){toast("error","Primero elige la fecha de despacho");return}$("planOpFile").click()});
+function leerListaOp(wb,fd){
+  function num(v){var t=String(v).replace(/,/g,"").trim();return t!==""&&isFinite(t)}
+  function ncols(a){var m=0;a.forEach(function(r){var c=0;r.forEach(function(v){if(String(v).trim()!=="")c++});if(c>m)m=c});return m}
+  var hojas=wb.SheetNames.map(function(n){var a=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:""});return {a:a,c:ncols(a)}}).filter(function(h){return h.a.length});
+  hojas.sort(function(x,y){return (x.c<=3?0:1)-(y.c<=3?0:1)});
+  for(var s=0;s<hojas.length;s++){var a=hojas[s].a,c=hojas[s].c,hi=-1,co=-1,cc=-1,cf=-1;
+    for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="op"||h==="orden"||h==="orden de produccion"||h==="o.p."}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;co=x;cc=y;cf=r.findIndex(function(h){return h.indexOf("fecha")===0})}}
+    if(hi<0){if(c>3)continue;co=0;cc=1}
+    if(c>3&&cf<0)continue;
+    var mp={};for(var k=hi+1;k<a.length;k++){var sp=String(a[k][co]).trim();if(!sp||!num(a[k][cc]))continue;
+      if(c>3){var fv=a[k][cf],iso="";if(typeof fv==="number"){var d=XLSX.SSF.parse_date_code(fv);if(d)iso=d.y+"-"+String(d.m).padStart(2,"0")+"-"+String(d.d).padStart(2,"0")}else iso=String(fv).slice(0,10);if(iso!==fd)continue}
+      var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp))mp[key]={op:sp,cant:0};mp[key].cant+=q}
+    if(Object.keys(mp).length)return mp}
+  return null}
 $("planOpBorrar").addEventListener("click",function(){var fd=$("fdesp").value;if(!confirm("\u00bfQuitar la lista por OP del "+fcorta(fd)+"?"))return;delete planesOp[fd];sv(K_PLANOP,planesOp);renderPlanOp()});
 $("planOpFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;var fd=$("fdesp").value;
   var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
-    var a=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""});
-    var hi=-1,co=-1,cc=-1;for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="op"||h==="orden"||h==="orden de produccion"||h==="o.p."}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;co=x;cc=y}}
-    if(hi<0){toast("error","El Excel debe tener columnas OP y cantidad");return}
-    var mp={},orden=[];for(var k=hi+1;k<a.length;k++){var sp=String(a[k][co]).trim();if(!sp)continue;var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp)){mp[key]={op:sp,cant:0};orden.push(key)}mp[key].cant+=q}
+     var mp=leerListaOp(wb,fd);if(mp===null){toast("error","No encontré una lista con OP y cantidad");return}var orden=Object.keys(mp);
     if(!orden.length){toast("error","No hay filas con OP");return}
     if(planesOp[fd]&&!confirm("Ya hay una lista por OP para el "+fcorta(fd)+". \u00bfReemplazarla?"))return;
     planesOp[fd]={archivo:f.name,cargado:new Date().toISOString(),items:orden.map(function(k){return mp[k]})};sv(K_PLANOP,planesOp);renderPlanOp();
