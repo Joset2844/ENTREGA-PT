@@ -687,11 +687,17 @@ function enviar(rs,msg){if(!cfgSb().url||!rs.length)return Promise.resolve();
 function borrarRemoto(id){if(cfgSb().url)llamar({action:"delete",id:id}).catch(function(){})}
 function pendientes(){return registros.filter(function(r){return !r.sync})}
 function num(v){return parseInt(v,10)||0}
+function normFecha(v){v=v==null?"":String(v).trim();if(!v)return "";
+  var m=v.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(m)return v;
+  if(/^\d{4}-\d{2}-\d{2}T/.test(v)){var d=new Date(v);if(!isNaN(d))return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2)}
+  m=v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);if(m){var y=m[3].length===2?"20"+m[3]:m[3];return y+"-"+("0"+m[2]).slice(-2)+"-"+("0"+m[1]).slice(-2)}
+  if(/^\d{5}(\.\d+)?$/.test(v)){var e=new Date(Date.UTC(1899,11,30)+parseFloat(v)*864e5);return e.toISOString().slice(0,10)}
+  var d2=new Date(v);if(!isNaN(d2))return d2.getFullYear()+"-"+("0"+(d2.getMonth()+1)).slice(-2)+"-"+("0"+d2.getDate()).slice(-2);return v}
 function traer(q){if(!cfgSb().url){if(!q)toast("error","Configura la conexión a Sheets");return Promise.resolve()}
   return llamar({action:"list"}).then(function(j){var n=0,ids={};(j.records||[]).forEach(function(x){ids[String(x.id).trim()]=1});
     if(q){var a=registros.length;registros=registros.filter(function(r){return !r.sync||ids[r.id]});n+=a-registros.length}
     (j.records||[]).forEach(function(x){
-      ["pedido","u","c","total"].forEach(function(k){x[k]=num(x[k])});x.sync=true;["id","fecha","fdesp","turno","nombre","op","sap","descripcion","cliente","empaque","estado","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});if(!x.fdesp)x.fdesp=x.fecha;
+      ["pedido","u","c","total"].forEach(function(k){x[k]=num(x[k])});x.sync=true;["id","fecha","fdesp","turno","nombre","op","sap","descripcion","cliente","empaque","estado","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});x.fecha=normFecha(x.fecha);x.fdesp=normFecha(x.fdesp);if(!x.fdesp)x.fdesp=x.fecha;
       var i=registros.findIndex(function(r){return r.id===x.id});
       if(i===-1){registros.push(x);n++}else if(registros[i].sync){registros[i]=x}
       if(x.nombre&&nombres.indexOf(x.nombre)===-1){nombres.push(x.nombre)}
@@ -789,7 +795,7 @@ function traerIng(q){
     (j.records||[]).forEach(function(x){
       ["u","c","total"].forEach(function(k){x[k]=num(x[k])});
       ["id","fecha","turno","nombre","op","sap","descripcion","cliente","empaque","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});
-      x.sync=true;var i=ingresos.findIndex(function(r){return r.id===x.id});
+      x.fecha=normFecha(x.fecha);x.sync=true;var i=ingresos.findIndex(function(r){return r.id===x.id});
       if(i===-1){ingresos.push(x);n++}else if(ingresos[i].sync){ingresos[i]=x}
       if(x.nombre&&nombres.indexOf(x.nombre)===-1)nombres.push(x.nombre)});
     nombres.sort(function(a,b){return a.localeCompare(b,"es",{sensitivity:"base"})});sv(K_NOM,nombres);sv(K_ING,ingresos);pintarNombres();renderIng();
