@@ -802,14 +802,17 @@ function traerIng(q){
     if(!q)toast("ok",n+" ingreso(s) nuevos traídos")}).catch(function(e){if(!q)toast("error","No se pudo traer: "+String(e.message).slice(0,60))})}
 $("iTraer").addEventListener("click",function(){traerIng(false)});
 // ---- sincronización automática entre dispositivos
-var syncOcupado=false;
-function autoSync(){if(syncOcupado||!navigator.onLine||!cfgSb().url)return;syncOcupado=true;
+var syncOcupado=false,syncDesde=0;
+function marcaSync(ok){var el=document.getElementById("syncMarca");if(!el){el=document.createElement("div");el.id="syncMarca";el.style.cssText="position:fixed;right:8px;bottom:8px;font:12px sans-serif;padding:4px 8px;border-radius:12px;background:rgba(0,0,0,.65);color:#fff;z-index:9999;cursor:pointer";el.title="Tocar para sincronizar ahora";el.onclick=function(){syncOcupado=false;autoSync()};document.body.appendChild(el)}
+  var d=new Date();el.textContent=(ok?"Sincronizado ":"Sin conexión con Sheets ")+("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+":"+("0"+d.getSeconds()).slice(-2)}
+function autoSync(){if(syncOcupado&&Date.now()-syncDesde<30000)return;if(!navigator.onLine||!cfgSb().url)return;syncOcupado=true;syncDesde=Date.now();
   var pr=pendientes(),pi=pendIng();
   Promise.resolve().then(function(){return pr.length?enviar(pr,false):0}).then(function(){return pi.length?enviarIng(pi,false):0})
     .then(function(){return traer(true)}).then(function(){return traerIng(true)})
     .then(function(){opPedidoVista="";try{sincronizarPedido()}catch(e){}})
-    .catch(function(){}).then(function(){syncOcupado=false})}
-setTimeout(autoSync,1500);setInterval(function(){if(!document.hidden)autoSync()},20000);
+    .then(function(){marcaSync(true)},function(){marcaSync(false)}).then(function(){syncOcupado=false})}
+setTimeout(autoSync,1000);setInterval(function(){if(!document.hidden)autoSync()},5000);
+var _svOrig=sv;sv=function(k,v){_svOrig(k,v);if((k===K_REG||k===K_ING)&&!syncOcupado){clearTimeout(window._syncT);window._syncT=setTimeout(autoSync,800)}};
 document.addEventListener("visibilitychange",function(){if(!document.hidden)autoSync()});
 window.addEventListener("online",autoSync);window.addEventListener("focus",autoSync);
 
