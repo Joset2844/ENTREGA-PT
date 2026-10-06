@@ -112,6 +112,11 @@ input[type=date]{-webkit-appearance:none;appearance:none}
   #iLista .empty{grid-column:1/-1}
 }
 @media(min-width:1100px){#iLista{grid-template-columns:repeat(3,1fr)}}
+.plan-t{width:100%;border-collapse:collapse;font-size:.78rem}
+.plan-t th{text-align:left;color:var(--muted);font-weight:500;padding:4px 6px;border-bottom:1px solid var(--border)}
+.plan-t td{padding:5px 6px;border-bottom:1px solid var(--border)}
+.plan-t td.n,.plan-t th.n{text-align:right}
+.plan-ok{color:var(--green)}.plan-pend{color:var(--amber)}.plan-exc{color:var(--red)}
 </style>
 </head>
 <body>
@@ -142,6 +147,18 @@ input[type=date]{-webkit-appearance:none;appearance:none}
     <button class="chip" data-v="Noche">Turno Noche</button>
   </div>
   <div id="despachoInfo" style="font-size:.76rem;color:var(--muted)"></div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
+    <button class="btn-s" id="planImp">Cargar lista de despacho (Excel SAP, CANT)</button>
+    <button class="btn-s hidden" id="planBorrar">Quitar lista</button>
+    <input type="file" id="planFile" accept=".xlsx,.xls,.csv" class="hidden"/>
+  </div>
+  <div id="planRes" style="margin-top:10px"></div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
+    <button class="btn-s" id="planOpImp">Cargar lista por OP (Excel OP, cantidad)</button>
+    <button class="btn-s hidden" id="planOpBorrar">Quitar lista OP</button>
+    <input type="file" id="planOpFile" accept=".xlsx,.xls,.csv" class="hidden"/>
+  </div>
+  <div id="planOpRes" style="margin-top:10px"></div>
 </div>
 <div id="regForm" class="panel">
   <div class="fcol">
@@ -420,7 +437,61 @@ function renderResumen(c,rs){
   function t(txt){var h=document.createElement("div");h.className="sec";h.style.gridColumn="1/-1";h.textContent=txt;c.appendChild(h)}
   t("Por OP y despacho — "+g.ops.length+" · "+tot+" u entregadas");g.ops.forEach(function(o){c.appendChild(tarjetaOp(o))});
   t("Por SAP y despacho (suma de las OP del mismo despacho)");g.saps.forEach(function(x){c.appendChild(tarjetaSap(x))})}
-function renderDespacho(){var fd=$("fdesp").value;
+var K_PLAN="ctrl_plan_despacho",planes=ld(K_PLAN,{});
+function renderPlan(){var fd=$("fdesp").value,c=$("planRes");c.innerHTML="";var p=planes[fd];
+  $("planBorrar").classList.toggle("hidden",!p);if(!p||!p.items.length)return;
+  var ent={};registros.forEach(function(r){if((r.fdesp||"")===fd){var k=String(r.sap||"").trim().toUpperCase();ent[k]=(ent[k]||0)+(r.total||0)}});
+  var tp=0,te=0,comp=0;
+  var rows=p.items.map(function(it){var k=it.sap.toUpperCase(),e=ent[k]||0,f=it.cant-e;tp+=it.cant;te+=Math.min(e,it.cant);if(f<=0)comp++;
+    var cl=f>0?"plan-pend":(f<0?"plan-exc":"plan-ok"),et=f>0?"Falta "+f:(f<0?"Exceso "+(-f):"Completo");
+    var m=buscarSap(it.sap);
+    return "<tr><td class='mono'>"+esc(it.sap)+(m?"<div style='color:var(--muted);font-size:.7rem'>"+esc(m)+"</div>":"")+"</td><td class='n mono'>"+it.cant+"</td><td class='n mono'>"+e+"</td><td class='n "+cl+"'>"+et+"</td></tr>"}).join("");
+  var pct=tp?Math.round(te*100/tp):0;
+  c.innerHTML="<div class='sec'>Lista de despacho "+fcorta(fd)+" · "+comp+"/"+p.items.length+" SAP completos · "+pct+"%</div>"+
+    "<div style='font-size:.7rem;color:var(--muted);margin-bottom:6px'>Archivo: "+esc(p.archivo||"")+"</div>"+
+    "<table class='plan-t'><thead><tr><th>SAP</th><th class='n'>Pedido</th><th class='n'>Entregado</th><th class='n'>Estado</th></tr></thead><tbody>"+rows+"</tbody></table>"}
+function buscarSap(sap){var q=String(sap).trim().toUpperCase();for(var i=0;i<catalogo.length;i++){var ms=catalogo[i].modelos||[];for(var j=0;j<ms.length;j++){if(String(ms[j].sap||"").trim().toUpperCase()===q)return ms[j].descripcion||ms[j].desc||""}}
+  for(var r=registros.length-1;r>=0;r--){if(String(registros[r].sap||"").trim().toUpperCase()===q)return registros[r].descripcion||""}return ""}
+$("planImp").addEventListener("click",function(){if(!$("fdesp").value){toast("error","Primero elige la fecha de despacho");return}$("planFile").click()});
+$("planBorrar").addEventListener("click",function(){var fd=$("fdesp").value;if(!confirm("¿Quitar la lista de despacho del "+fcorta(fd)+"?"))return;delete planes[fd];sv(K_PLAN,planes);renderPlan()});
+$("planFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;var fd=$("fdesp").value;
+  var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
+    var a=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""});
+    var hi=-1,cs=-1,cc=-1;for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="sap"||h==="codigo sap"||h==="cod sap"}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;cs=x;cc=y}}
+    if(hi<0){toast("error","El Excel debe tener columnas SAP y CANT");return}
+    var mp={},orden=[];for(var k=hi+1;k<a.length;k++){var sp=String(a[k][cs]).trim();if(!sp)continue;var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp)){mp[key]={sap:sp,cant:0};orden.push(key)}mp[key].cant+=q}
+    if(!orden.length){toast("error","No hay filas con SAP");return}
+    if(planes[fd]&&!confirm("Ya hay una lista para el "+fcorta(fd)+". ¿Reemplazarla?"))return;
+    planes[fd]={archivo:f.name,cargado:new Date().toISOString(),items:orden.map(function(k){return mp[k]})};sv(K_PLAN,planes);renderPlan();
+    toast("ok","Lista cargada: "+orden.length+" SAP para el "+fcorta(fd))}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
+var K_PLANOP="ctrl_plan_op",planesOp=ld(K_PLANOP,{});
+function renderPlanOp(){var fd=$("fdesp").value,c=$("planOpRes");c.innerHTML="";var p=planesOp[fd];
+  $("planOpBorrar").classList.toggle("hidden",!p);if(!p||!p.items.length)return;
+  var ent={};registros.forEach(function(r){if((r.fdesp||"")===fd){var k=String(r.op||"").trim().toUpperCase();ent[k]=(ent[k]||0)+(r.total||0)}});
+  var tp=0,te=0,comp=0;
+  var rows=p.items.map(function(it){var k=it.op.toUpperCase(),e=ent[k]||0,f=it.cant-e;tp+=it.cant;te+=Math.min(e,it.cant);if(f<=0)comp++;
+    var cl=f>0?"plan-pend":(f<0?"plan-exc":"plan-ok"),et=f>0?"Falta "+f:(f<0?"Exceso "+(-f):"Completo");
+    var m=buscarOp(it.op);
+    return "<tr><td class='mono'>"+esc(it.op)+(m?"<div style='color:var(--muted);font-size:.7rem'>"+esc(m)+"</div>":"")+"</td><td class='n mono'>"+it.cant+"</td><td class='n mono'>"+e+"</td><td class='n "+cl+"'>"+et+"</td></tr>"}).join("");
+  var pct=tp?Math.round(te*100/tp):0;
+  c.innerHTML="<div class='sec'>Lista por OP "+fcorta(fd)+" \u00b7 "+comp+"/"+p.items.length+" OP completas \u00b7 "+pct+"%</div>"+
+    "<div style='font-size:.7rem;color:var(--muted);margin-bottom:6px'>Archivo: "+esc(p.archivo||"")+"</div>"+
+    "<table class='plan-t'><thead><tr><th>OP</th><th class='n'>Pedido</th><th class='n'>Entregado</th><th class='n'>Estado</th></tr></thead><tbody>"+rows+"</tbody></table>"}
+function buscarOp(op){var q=String(op).trim().toUpperCase();for(var i=0;i<catalogo.length;i++){if(String(catalogo[i].op||"").trim().toUpperCase()===q){var d=catalogo[i].descripcion||catalogo[i].desc||"";var cl=catalogo[i].cliente||"";return (d+(cl?" \u00b7 "+cl:""))||cl}}
+  for(var r=registros.length-1;r>=0;r--){if(String(registros[r].op||"").trim().toUpperCase()===q)return registros[r].descripcion||""}return ""}
+$("planOpImp").addEventListener("click",function(){if(!$("fdesp").value){toast("error","Primero elige la fecha de despacho");return}$("planOpFile").click()});
+$("planOpBorrar").addEventListener("click",function(){var fd=$("fdesp").value;if(!confirm("\u00bfQuitar la lista por OP del "+fcorta(fd)+"?"))return;delete planesOp[fd];sv(K_PLANOP,planesOp);renderPlanOp()});
+$("planOpFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;var fd=$("fdesp").value;
+  var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
+    var a=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""});
+    var hi=-1,co=-1,cc=-1;for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="op"||h==="orden"||h==="orden de produccion"||h==="o.p."}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;co=x;cc=y}}
+    if(hi<0){toast("error","El Excel debe tener columnas OP y cantidad");return}
+    var mp={},orden=[];for(var k=hi+1;k<a.length;k++){var sp=String(a[k][co]).trim();if(!sp)continue;var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp)){mp[key]={op:sp,cant:0};orden.push(key)}mp[key].cant+=q}
+    if(!orden.length){toast("error","No hay filas con OP");return}
+    if(planesOp[fd]&&!confirm("Ya hay una lista por OP para el "+fcorta(fd)+". \u00bfReemplazarla?"))return;
+    planesOp[fd]={archivo:f.name,cargado:new Date().toISOString(),items:orden.map(function(k){return mp[k]})};sv(K_PLANOP,planesOp);renderPlanOp();
+    toast("ok","Lista por OP cargada: "+orden.length+" OP para el "+fcorta(fd))}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
+function renderDespacho(){renderPlan();renderPlanOp();var fd=$("fdesp").value;
   var sub=registros.filter(function(r){return (r.fdesp||"")===fd});
   var tot=sub.reduce(function(a,r){return a+(r.total||0)},0);
   $("despachoInfo").textContent="Despacho "+fcorta(fd)+": "+sub.length+" entrada(s) · "+tot+" u entregadas";
