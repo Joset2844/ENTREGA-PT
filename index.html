@@ -422,8 +422,8 @@ function agrupar(rs){var ops={},ordenO=[],saps={},ordenS=[];
     var gk=fd+"|"+sk,S=saps[gk]||(saps[gk]={fdesp:fd,sap:r.sap||"",desc:r.descripcion,ent:0,ops:{}});if(ordenS.indexOf(gk)===-1)ordenS.push(gk);
     S.ent+=r.total||0;S.ops[r.op]=1});
   function cmp(a,b,ka,kb){return a.fdesp<b.fdesp?1:a.fdesp>b.fdesp?-1:ka.localeCompare(kb,"es",{numeric:true})}
-  var lo=ordenO.map(function(k){var o=ops[k];o.acum=acumulado(o.op,o.fdesp);return o}).sort(function(a,b){return cmp(a,b,a.op,b.op)});
-  var ls=ordenS.map(function(k){return saps[k]}).sort(function(a,b){return cmp(a,b,a.sap||a.desc,b.sap||b.desc)});
+  var lo=ordenO.map(function(k){var o=ops[k];o.acum=acumulado(o.op,o.fdesp);return o});
+  var ls=ordenS.map(function(k){return saps[k]});
   return{ops:lo,saps:ls}}
 function tarjetaOp(o){var d=document.createElement("div");d.className="card";
   var pd=o.pedido-o.acum,ok=o.pedido>0&&pd<=0;
@@ -687,8 +687,9 @@ function enviar(rs,msg){if(!cfgSb().url||!rs.length)return Promise.resolve();
 function borrarRemoto(id){if(cfgSb().url)llamar({action:"delete",id:id}).catch(function(){})}
 function pendientes(){return registros.filter(function(r){return !r.sync})}
 function num(v){return parseInt(v,10)||0}
-function traer(){if(!cfgSb().url){toast("error","Configura la conexión a Sheets");return}
-  llamar({action:"list"}).then(function(j){var n=0;
+function traer(q){if(!cfgSb().url){if(!q)toast("error","Configura la conexión a Sheets");return Promise.resolve()}
+  return llamar({action:"list"}).then(function(j){var n=0,ids={};(j.records||[]).forEach(function(x){ids[String(x.id).trim()]=1});
+    if(q){var a=registros.length;registros=registros.filter(function(r){return !r.sync||ids[r.id]});n+=a-registros.length}
     (j.records||[]).forEach(function(x){
       ["pedido","u","c","total"].forEach(function(k){x[k]=num(x[k])});x.sync=true;["id","fecha","fdesp","turno","nombre","op","sap","descripcion","cliente","empaque","estado","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});if(!x.fdesp)x.fdesp=x.fecha;
       var i=registros.findIndex(function(r){return r.id===x.id});
@@ -696,10 +697,10 @@ function traer(){if(!cfgSb().url){toast("error","Configura la conexión a Sheets
       if(x.nombre&&nombres.indexOf(x.nombre)===-1){nombres.push(x.nombre)}
     });
     nombres.sort(function(a,b){return a.localeCompare(b,"es",{sensitivity:"base"})});sv(K_NOM,nombres);sv(K_REG,registros);pintarNombres();renderLista();
-    toast("ok",n+" registro(s) nuevos traídos")}).catch(function(e){toast("error","No se pudo traer: "+String(e.message).slice(0,60))})}
+    if(!q)toast("ok",n+" registro(s) nuevos traídos")}).catch(function(e){if(!q)toast("error","No se pudo traer: "+String(e.message).slice(0,60))})}
 $("envSb").addEventListener("click",function(){if(!cfgSb().url){toast("error","Configura la conexión a Sheets");return}
   var p=pendientes();if(!p.length){toast("ok","Todo está sincronizado");return}enviar(p,true)});
-$("traeSb").addEventListener("click",traer);
+$("traeSb").addEventListener("click",function(){traer(false)});
 // ---- imprimir
 function resumenHtml(rs){var g=agrupar(rs);
   var a="<h2>Resumen por OP</h2><table><thead><tr><th>Despacho</th><th>OP</th><th>Cliente</th><th>Pedido</th><th>Entregado</th><th>Acumulado</th><th>Pendiente</th><th>Excedente</th><th>Estado</th></tr></thead><tbody>"+g.ops.map(function(o){return "<tr><td class='k'>"+fcorta(o.fdesp)+"</td><td class='k'>"+esc(o.op)+"</td><td>"+esc(o.cliente)+"</td><td class='n p'>"+o.pedido+"</td><td class='n e'>"+o.ent+"</td><td class='n'>"+o.acum+"</td><td class='n'>"+Math.max(o.pedido-o.acum,0)+"</td><td class='n"+(o.pedido>0&&o.acum>o.pedido?" x":"")+"'>"+(o.pedido>0?Math.max(o.acum-o.pedido,0):0)+"</td><td class='k s-"+estadoDe(o.op,o.fdesp)+"'>"+estadoDe(o.op,o.fdesp)+"</td></tr>"}).join("")+"</tbody></table>";
@@ -782,8 +783,9 @@ function enviarIng(rs,msg){if(!rs.length)return Promise.resolve();
 function pendIng(){return ingresos.filter(function(r){return !r.sync})}
 function borrarIng(id){llamar({action:"delete",tabla:"ingresos",id:id}).catch(function(){})}
 $("iEnv").addEventListener("click",function(){var p=pendIng();if(!p.length){toast("ok","Todo está sincronizado");return}enviarIng(p,true)});
-$("iTraer").addEventListener("click",function(){
-  llamar({action:"list",tabla:"ingresos"}).then(function(j){var n=0;
+function traerIng(q){
+  return llamar({action:"list",tabla:"ingresos"}).then(function(j){var n=0,ids={};(j.records||[]).forEach(function(x){ids[String(x.id).trim()]=1});
+    if(q){ingresos=ingresos.filter(function(r){return !r.sync||ids[r.id]})}
     (j.records||[]).forEach(function(x){
       ["u","c","total"].forEach(function(k){x[k]=num(x[k])});
       ["id","fecha","turno","nombre","op","sap","descripcion","cliente","empaque","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});
@@ -791,7 +793,19 @@ $("iTraer").addEventListener("click",function(){
       if(i===-1){ingresos.push(x);n++}else if(ingresos[i].sync){ingresos[i]=x}
       if(x.nombre&&nombres.indexOf(x.nombre)===-1)nombres.push(x.nombre)});
     nombres.sort(function(a,b){return a.localeCompare(b,"es",{sensitivity:"base"})});sv(K_NOM,nombres);sv(K_ING,ingresos);pintarNombres();renderIng();
-    toast("ok",n+" ingreso(s) nuevos traídos")}).catch(function(e){toast("error","No se pudo traer: "+String(e.message).slice(0,60))})});
+    if(!q)toast("ok",n+" ingreso(s) nuevos traídos")}).catch(function(e){if(!q)toast("error","No se pudo traer: "+String(e.message).slice(0,60))})}
+$("iTraer").addEventListener("click",function(){traerIng(false)});
+// ---- sincronización automática entre dispositivos
+var syncOcupado=false;
+function autoSync(){if(syncOcupado||!navigator.onLine||!cfgSb().url)return;syncOcupado=true;
+  var pr=pendientes(),pi=pendIng();
+  Promise.resolve().then(function(){return pr.length?enviar(pr,false):0}).then(function(){return pi.length?enviarIng(pi,false):0})
+    .then(function(){return traer(true)}).then(function(){return traerIng(true)})
+    .then(function(){opPedidoVista="";try{sincronizarPedido()}catch(e){}})
+    .catch(function(){}).then(function(){syncOcupado=false})}
+setTimeout(autoSync,1500);setInterval(function(){if(!document.hidden)autoSync()},20000);
+document.addEventListener("visibilitychange",function(){if(!document.hidden)autoSync()});
+window.addEventListener("online",autoSync);window.addEventListener("focus",autoSync);
 
 // Excel (tabla simple, sin sumas)
 function xmlIngresos(rs){
