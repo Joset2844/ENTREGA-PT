@@ -89,8 +89,8 @@ input[type=date]{-webkit-appearance:none;appearance:none}
   #t-lista>.panel{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
   #t-lista>.panel .row2{display:contents}
   #t-lista>.panel>.field:last-child{grid-column:1/-1}
-  #lista{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
-  #lista .card{margin-bottom:0}
+  #lista{display:block}
+  #lista .card{margin-bottom:8px}
   #lista .empty{grid-column:1/-1}
   .card .meta{font-size:.84rem}
   #t-cfg{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
@@ -100,7 +100,6 @@ input[type=date]{-webkit-appearance:none;appearance:none}
 }
 @media(min-width:1100px){
   .wrap{max-width:1180px}
-  #lista{grid-template-columns:repeat(3,1fr)}
 }
 #iLista .card{overflow-wrap:anywhere}
 @media(max-width:420px){.tab{padding:7px 2px;font-size:.66rem}}
@@ -278,7 +277,7 @@ input[type=date]{-webkit-appearance:none;appearance:none}
     <button class="btn sec2" id="addNombres" style="margin-top:8px">Agregar habilitadores</button>
     <div id="nombresLista" style="margin-top:10px"></div>
   </div>
-  <div class="panel">
+  <div class="panel hidden">
     <div class="sec">Instalación de la app (PWA)</div>
     <div id="pwaDiag" style="font-size:.78rem;color:var(--muted2);line-height:1.35"></div>
     <button class="btn-s" id="pwaRevisar" style="margin-top:8px">Revisar de nuevo</button>
