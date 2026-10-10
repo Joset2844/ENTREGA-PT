@@ -4,147 +4,208 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <title>Control de Entregas</title>
-<meta name="theme-color" content="#12161F" />
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#1A202C" media="(prefers-color-scheme: dark)" />
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" type="image/png" href="icons/icon-192.png" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Entregas" />
 <script>window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.__ip=e;var b=document.getElementById("btnInstalar");if(b)b.classList.remove("hidden")})</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
-:root{--bg:#12161F;--panel:#1A202C;--alt:#232A38;--border:#2D3748;--inp:#4A5568;--amber:#F2A93B;--green:#38A169;--red:#E53E3E;--blue:#4299E1;--muted:#A0AEC0;--muted2:#CBD5E0;--text:#F7FAFC;}
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+:root{
+  --bg:#EEF1F6;--panel:#FFFFFF;--field:#FFFFFF;--alt:#F3F5F9;--border:#E0E5ED;--line:#E0E5ED;--inp:#C3CCD9;
+  --text:#1B2433;--muted:#5E6A7D;--muted2:#3D495C;
+  --amber:#F5A524;--acc:#F5A524;--on-amber:#1B2433;--amber-ink:#8A5300;--amber-soft:#FFF1D6;
+  --green:#1E8E4E;--red:#D23B3B;--blue:#2B6BCB;
+  --ok-tx:#1B7A44;--err-tx:#B42323;--warn-tx:#8A5300;
+  --op-bg:#FFF1D6;--op-tx:#7A4800;
+  --shadow:0 1px 2px rgba(20,30,50,.06),0 4px 14px rgba(20,30,50,.05);
+  --r:14px;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#12161F;--panel:#1A202C;--field:#232A38;--alt:#232A38;--border:#2D3748;--line:#2D3748;--inp:#4A5568;
+  --text:#F7FAFC;--muted:#A0AEC0;--muted2:#CBD5E0;
+  --amber-ink:#F6AD55;--amber-soft:#3A2E1B;
+  --green:#38A169;--red:#E53E3E;--blue:#4299E1;
+  --ok-tx:#68D391;--err-tx:#FC8181;--warn-tx:#F2A93B;
+  --op-bg:#3A2E1B;--op-tx:#F6AD55;--shadow:none;color-scheme:dark}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;padding-bottom:30px;-webkit-tap-highlight-color:transparent}
-.mono{font-family:'IBM Plex Mono',monospace}
-header{position:sticky;top:0;z-index:30;background:var(--panel);border-bottom:3px solid var(--amber)}
-.wrap{max-width:760px;margin:0 auto;padding:0 16px}
-h1{margin:0;padding:8px 0 4px;font-size:.9rem;font-weight:600}
-.tabs{display:flex;gap:6px;padding:4px 0 8px}
-.tab{flex:1;background:var(--border);border:none;color:var(--muted2);padding:7px 10px;border-radius:16px;font:600 .7rem 'Oswald',sans-serif;text-transform:uppercase;letter-spacing:.03em;cursor:pointer}
-.tab.active{background:var(--amber);color:#12161F}
-main{padding:16px 0}
-.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Figtree',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:16px;line-height:1.4;overflow-x:hidden;padding-bottom:calc(56px + env(safe-area-inset-bottom));-webkit-tap-highlight-color:transparent}
+.mono{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace}
+.hidden{display:none!important}
+:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+
+/* ===== Cabecera: marca, pestañas y datos del turno ===== */
+header.top{position:sticky;top:0;z-index:30;background:var(--panel);border-bottom:1px solid var(--border);box-shadow:var(--shadow);padding-top:env(safe-area-inset-top)}
+.wrap{max-width:1800px;margin:0 auto;padding-left:max(clamp(12px,2.2vw,32px),env(safe-area-inset-left));padding-right:max(clamp(12px,2.2vw,32px),env(safe-area-inset-right))}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 22px;padding-top:10px;padding-bottom:10px}
+.brand{display:flex;align-items:center;gap:12px;flex:none}
+h1{margin:0;font-size:1.1rem;font-weight:700;letter-spacing:-.01em}
+.tabs{display:flex;gap:4px;padding:4px;background:var(--alt);border-radius:12px;flex:none}
+.tab{border:none;background:transparent;color:var(--muted2);padding:0 20px;min-height:40px;border-radius:9px;font:600 .95rem 'Figtree',sans-serif;cursor:pointer}
+.tab:hover:not(.active){background:var(--border)}
+.tab.active{background:var(--amber);color:var(--on-amber)}
+.ctx{flex:1 1 100%}
+.ctxg{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) auto;gap:8px;align-items:end;width:100%}
+.cf{min-width:0}
+.cf label{font-size:.72rem;font-weight:600;color:var(--muted);margin:0 0 3px 2px;white-space:nowrap}
+.cf input,.cf select{min-height:42px;padding:6px 8px;font-size:.88rem;border-radius:10px}
+.chips.seg{margin:0}
+.seg{gap:0;background:var(--field);border:1px solid var(--inp);border-radius:10px;padding:3px}
+.seg .chip{border:none;background:transparent;min-height:34px;padding:0 12px;border-radius:7px;font-size:.88rem}
+.seg .chip.active{background:var(--amber);color:var(--on-amber)}
+@media(min-width:601px){
+  .ctxg{grid-template-columns:minmax(150px,210px) minmax(180px,320px) auto;justify-content:start}
+  .cf input,.cf select{font-size:.95rem;padding:6px 10px}.seg .chip{padding:0 16px;font-size:.92rem}}
+@media(min-width:1180px){
+  .bar{flex-wrap:nowrap}.ctx{flex:0 0 auto;margin-left:auto}.ctxg{width:auto}}
+@media(max-width:600px){
+  h1{display:none}.brand:empty{display:none}.bar{gap:6px;padding-top:8px;padding-bottom:8px}
+  .tabs{flex:1 1 100%}.tab{flex:1;padding:0 4px;font-size:.86rem}
+  .ctxg{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto}
+  .cf input[type=date]::-webkit-calendar-picker-indicator{display:none}}
+@media(max-height:560px){header.top{position:static}}
+
+/* ===== Estructura general ===== */
+main{padding:18px 0 28px}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
+.sec{font:700 1rem 'Figtree',sans-serif;color:var(--text);margin:0 0 10px}
 .field{margin-bottom:12px;position:relative}
-label{display:block;font-size:.72rem;font-weight:500;color:var(--muted2);margin-bottom:4px}
-input,select,textarea{width:100%;padding:9px 11px;border-radius:6px;border:1px solid var(--inp);background:var(--alt);color:var(--text);font-size:.9rem;outline:none;font-family:inherit}
-input:focus,select:focus,textarea:focus{border-color:var(--amber);box-shadow:0 0 0 2px rgba(242,169,59,.3)}
-.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fcol{min-width:0}
+label{display:block;font-size:.82rem;font-weight:600;color:var(--muted2);margin-bottom:5px}
+input,select,textarea{width:100%;min-height:44px;padding:9px 12px;border-radius:10px;border:1px solid var(--inp);background:var(--field);color:var(--text);font:inherit;font-size:16px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--amber);box-shadow:0 0 0 3px rgba(245,165,36,.35)}
+input[type=date]{-webkit-appearance:none;appearance:none}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.info{font-size:.85rem;color:var(--muted)}
+.despRow{display:flex;flex-wrap:wrap;gap:0 16px;align-items:flex-end}
+.despRow>.field{flex:0 1 220px;min-width:170px}
+.despRow>.tools{flex:1 1 320px}
+.plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:14px;margin-top:10px}
+.plans>div:empty{display:none}
+
+/* chips, botones */
 .chips{display:flex;gap:8px;margin-bottom:12px}
-.chip{flex:1;padding:9px 6px;border-radius:6px;border:1px solid var(--inp);background:var(--alt);color:var(--muted2);font-size:.78rem;font-weight:600;cursor:pointer}
-.chip.active{background:var(--amber);border-color:var(--amber);color:#12161F}
+.chip{flex:1;min-height:44px;padding:8px 10px;border-radius:10px;border:1px solid var(--inp);background:var(--field);color:var(--muted2);font:600 .9rem 'Figtree',sans-serif;line-height:1.2;cursor:pointer}
+.chip:hover:not(.active){background:var(--alt)}
+.chip.active{background:var(--amber);border-color:var(--amber);color:var(--on-amber)}
 .chip.st-COMPLETO.active{background:var(--green);border-color:var(--green);color:#fff}
 .chip.st-INCOMPLETO.active{background:var(--red);border-color:var(--red);color:#fff}
 .chip.st-ENPRODUCCION.active{background:var(--blue);border-color:var(--blue);color:#fff}
-.sec{font:600 .8rem 'Oswald',sans-serif;text-transform:uppercase;letter-spacing:.04em;color:var(--amber);margin:4px 0 8px}
-.total{display:flex;justify-content:space-between;background:var(--alt);border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:.75rem;color:var(--muted2)}
-.total b{color:var(--amber);font-size:1.05rem}
-.btn{width:100%;background:var(--amber);color:#12161F;border:none;padding:11px;border-radius:6px;font-weight:600;font-size:.85rem;cursor:pointer}
+.modo{max-width:480px}
+.btn{width:100%;min-height:48px;background:var(--amber);color:var(--on-amber);border:none;padding:12px;border-radius:12px;font:700 1rem 'Figtree',sans-serif;cursor:pointer}
+.btn:hover:not(:disabled){filter:brightness(.96)}
 .btn.sec2{background:var(--alt);color:var(--text);border:1px solid var(--inp)}
-.btn-s{background:var(--alt);color:var(--text);border:1px solid var(--inp);padding:7px 12px;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer}
-.sug{position:absolute;z-index:20;width:100%;margin-top:2px;background:var(--panel);border:1px solid var(--inp);border-radius:6px;max-height:220px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.5)}
-.sug button{display:block;width:100%;text-align:left;padding:9px 11px;border:none;border-bottom:1px solid var(--border);background:none;color:var(--text);font-size:.78rem;cursor:pointer}
-.sug .o{color:#F6AD55;font-weight:600}.sug .m{color:var(--muted)}
-.hidden{display:none!important}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px}
-.card .top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
-.op{font-size:.72rem;font-weight:600;background:#3A2E1B;color:#F6AD55;padding:2px 7px;border-radius:4px}
-.badge{font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:4px;color:#fff}
-.b-COMPLETO{background:var(--green)}.b-INCOMPLETO{background:var(--red)}.b-ENPRODUCCION{background:var(--blue)}
-.meta{font-size:.76rem;color:var(--muted2);margin-top:4px}.meta strong{color:var(--amber)}
-.del{background:none;border:none;color:var(--red);cursor:pointer;font-size:.75rem}
-.empty{border:1px dashed var(--inp);border-radius:10px;padding:26px;text-align:center;color:var(--muted2);font-size:.85rem;background:var(--alt)}
-.toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:50;padding:10px 16px;border-radius:8px;color:#fff;font-size:.82rem;font-weight:500}
-.toast.ok{background:var(--green)}.toast.error{background:var(--red)}
-.tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.btn-s{min-height:40px;background:var(--field);color:var(--text);border:1px solid var(--inp);padding:8px 14px;border-radius:10px;font:600 .85rem 'Figtree',sans-serif;cursor:pointer}
+.btn-s:hover{background:var(--alt)}
+#btnInstalar{background:var(--amber);color:var(--on-amber);border-color:var(--amber)}
+@media(pointer:coarse){.btn-s{min-height:44px}}
+.tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+#cuenta,#iCuenta{font-size:.85rem;color:var(--muted);margin-left:auto}
+.total{display:flex;justify-content:space-between;align-items:center;background:var(--amber-soft);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:.9rem;color:var(--muted2);font-weight:600}
+.total b{color:var(--amber-ink);font-size:1.3rem}
+.sug{position:absolute;z-index:20;width:100%;margin-top:2px;background:var(--panel);border:1px solid var(--inp);border-radius:10px;max-height:240px;overflow-y:auto;box-shadow:0 8px 24px rgba(20,30,50,.18)}
+.sug button{display:block;width:100%;text-align:left;padding:12px;border:none;border-bottom:1px solid var(--border);background:none;color:var(--text);font:inherit;font-size:.85rem;cursor:pointer}
+.sug button:hover{background:var(--alt)}
+.sug .o{color:var(--amber-ink);font-weight:600}.sug .m{color:var(--muted)}
 
-/* ===== Responsive: teléfono / tablet 10" ===== */
-html{-webkit-text-size-adjust:100%}
-body{overflow-x:hidden;padding-bottom:calc(30px + env(safe-area-inset-bottom))}
-header{padding-top:env(safe-area-inset-top)}
-.wrap{padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
-input,select,textarea{font-size:16px;min-height:44px}
-input[type=date]{-webkit-appearance:none;appearance:none}
-.chip,.btn,.btn-s,.tab{min-height:44px}
-.chip{white-space:normal;line-height:1.2}
-.tab{font-size:.74rem}
-.card{overflow-wrap:anywhere}
-.card select{min-height:40px;font-size:14px}
-.sug button{padding:13px 12px}
-.toast{top:calc(14px + env(safe-area-inset-top));max-width:92vw;text-align:center}
-.tools .btn-s{flex:1 1 40%}
-#cuenta,#iCuenta{flex:1 1 100%}
-#guardar{margin-top:6px}
-@media(max-width:380px){.chip{font-size:.7rem;padding:8px 4px}.panel{padding:12px}.row2{gap:8px}}
-@media(min-width:700px){
-  body{font-size:16px}
-  .wrap{max-width:1000px}
-  .tabs{gap:10px}.tab{font-size:.82rem;flex:0 0 auto;padding:8px 26px}
-  main{padding:22px 0}
-  #regForm,#ingForm{display:grid;grid-template-columns:1fr 1fr;gap:0 32px;padding:24px;align-items:start}
-  .btn{padding:14px;font-size:.95rem}
-  #t-lista>.panel{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
-  #t-lista>.panel .row2{display:contents}
-  #t-lista>.panel>.field:last-child{grid-column:1/-1}
-  #lista{display:block}
-  #lista .card{margin-bottom:8px}
-  #lista .empty{grid-column:1/-1}
-  .card .meta{font-size:.84rem}
-  #t-cfg{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
-  #t-cfg .panel{margin:0}
-  .tools .btn-s{flex:0 0 auto;padding:10px 18px}
-  #cuenta,#iCuenta{flex:0 0 auto}
-}
-@media(min-width:1100px){
-  .wrap{max-width:1180px}
-}
-#iLista .card{overflow-wrap:anywhere}
-@media(max-width:420px){.tab{padding:7px 2px;font-size:.66rem}}
-@media(min-width:700px){
-  #iFiltros{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-  #iFiltros .row2{display:contents}
-  #iLista{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
-  #iLista .card{margin-bottom:0}
-  #iLista .empty{grid-column:1/-1}
-}
-@media(min-width:1100px){#iLista{grid-template-columns:repeat(3,1fr)}}
-.plan-t{width:100%;border-collapse:collapse;font-size:.78rem}
-.plan-t th{text-align:left;color:var(--muted);font-weight:500;padding:4px 6px;border-bottom:1px solid var(--border)}
-.plan-t td{padding:5px 6px;border-bottom:1px solid var(--border)}
+/* tarjetas */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:10px;box-shadow:var(--shadow);overflow-wrap:anywhere}
+.card .top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.op{font-size:.8rem;font-weight:600;background:var(--op-bg);color:var(--op-tx);padding:3px 10px;border-radius:999px}
+.badge{font-size:.72rem;font-weight:700;padding:3px 10px;border-radius:999px;color:#fff;background:var(--muted)}
+.b-COMPLETO{background:var(--green)}.b-INCOMPLETO{background:var(--red)}.b-ENPRODUCCION{background:var(--blue)}
+.meta{font-size:.85rem;color:var(--muted2);margin-top:5px}.meta strong{color:var(--text);font-weight:700}
+.del{background:none;border:none;color:var(--red);cursor:pointer;font:600 .82rem 'Figtree',sans-serif;padding:8px 10px;border-radius:8px}
+.del:hover{background:var(--alt)}
+.empty{border:1.5px dashed var(--inp);border-radius:var(--r);padding:30px;text-align:center;color:var(--muted2);font-size:.95rem;background:var(--panel)}
+.toast{position:fixed;top:calc(14px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:1000;max-width:92vw;text-align:center;padding:11px 18px;border-radius:12px;color:#fff;font-size:.9rem;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.toast.ok{background:var(--green)}.toast.error{background:var(--red)}
+
+/* listas: se reparten en columnas según el ancho disponible */
+#lista,#iLista,#despachoRes{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,380px),1fr));gap:12px;align-items:start}
+#lista .card,#iLista .card,#despachoRes .card{margin:0}
+#lista .empty,#iLista .empty,#despachoRes>.sec{grid-column:1/-1}
+#despachoRes{margin-top:6px}
+
+/* filtros */
+#t-lista>.panel,#iFiltros{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+#t-lista>.panel .row2,#iFiltros .row2{display:contents}
+#t-lista>.panel>.field:last-child{grid-column:1/-1}
+#iFiltros .field,#t-lista>.panel .field{margin:0!important}
+@media(min-width:900px){#t-lista>.panel>.field:last-child{grid-column:span 2}}
+
+/* formularios en 2 columnas */
+@media(min-width:760px){
+  #regForm,#ingForm{display:grid;grid-template-columns:1fr 1fr;gap:0 36px;padding:22px;align-items:start;max-width:1280px}}
+#t-cfg{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:14px;align-items:start}
+#t-cfg .panel{margin:0}
+
+/* tablas */
+.plan-t{width:100%;border-collapse:collapse;font-size:.85rem}
+.plan-t th{text-align:left;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--inp)}
+.plan-t td{padding:7px 8px;border-bottom:1px solid var(--border);vertical-align:top}
 .plan-t td.n,.plan-t th.n{text-align:right}
-.plan-ok{color:var(--green)}.plan-pend{color:var(--amber)}.plan-exc{color:var(--red)}
-.gwrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin:10px 0}
-.gt{width:100%;border-collapse:collapse;font-size:.8rem;min-width:980px}
-.gt th{position:sticky;top:0;background:var(--alt);color:var(--muted2);font-weight:600;text-align:left;padding:6px;border-bottom:1px solid var(--inp);white-space:nowrap;font-size:.7rem;text-transform:uppercase}
-.gt td{padding:3px 4px;border-bottom:1px solid var(--border);vertical-align:middle}
-.gt td.ro{color:var(--muted2);font-size:.74rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gt input,.gt select{min-height:36px;padding:5px 7px;font-size:14px;border-radius:4px}
-.gt input.n{text-align:right;width:84px}
+.plan-ok{color:var(--ok-tx)}.plan-pend{color:var(--warn-tx)}.plan-exc{color:var(--err-tx)}
+.gwrap{overflow:auto;border:1px solid var(--border);border-radius:12px;margin:10px 0 14px;background:var(--panel)}
+@media(min-width:900px){.gwrap{max-height:calc(100vh - 340px);min-height:260px}}
+.gt{width:100%;border-collapse:separate;border-spacing:0;font-size:.86rem}
+.gt th{position:sticky;top:0;z-index:2;background:var(--alt);color:var(--muted2);font-weight:700;text-align:left;padding:9px 6px;border-bottom:1px solid var(--inp);white-space:nowrap;font-size:.78rem}
+.gt td{padding:5px 4px;border-bottom:1px solid var(--border);vertical-align:middle}
+.gt td.ro{color:var(--muted2);font-size:.82rem;white-space:normal;overflow-wrap:anywhere;min-width:96px}
+.gt td.desc{min-width:170px}
+.gt td.sap{white-space:nowrap;min-width:84px}
+.gt .dash{color:var(--muted)}
+.gt input,.gt select{min-height:40px;padding:6px 8px;font-size:14px;border-radius:8px}
+.gt select{min-width:96px}
+.gt input[data-f=op]{width:124px}
+.gt input.n{text-align:right;width:74px}
 .gt td.num{text-align:right;font-family:'IBM Plex Mono',monospace;white-space:nowrap}
-.gt tr.err td{background:rgba(229,62,62,.12)}.gt tr.warn td{background:rgba(242,169,59,.10)}.gt tr.ok td{background:rgba(56,161,105,.08)}
-.gt .msg{font-size:.7rem;white-space:normal;min-width:130px}
-.gt tr.err .msg{color:#FC8181}.gt tr.warn .msg{color:var(--amber)}.gt tr.ok .msg{color:#68D391}
-.gt .x{background:none;border:none;color:var(--red);cursor:pointer;font-size:1rem;min-height:30px}
-.gt td.idx{color:var(--muted);font-size:.7rem;text-align:center;width:26px}
-#gridPanel .ayuda{font-size:.72rem;color:var(--muted);margin-top:4px}
-#gridPanel .resumen{display:flex;gap:14px;flex-wrap:wrap;font-size:.78rem;color:var(--muted2);margin-bottom:8px}
-#gridPanel .resumen b{color:var(--amber)}
+.gt tr.err td{background:rgba(210,59,59,.09)}.gt tr.warn td{background:rgba(245,165,36,.14)}.gt tr.ok td{background:rgba(30,142,78,.07)}
+.gt tr.err td:first-child{box-shadow:inset 4px 0 0 var(--red)}.gt tr.warn td:first-child{box-shadow:inset 4px 0 0 var(--amber)}.gt tr.ok td:first-child{box-shadow:inset 4px 0 0 var(--green)}
+.gt .msg{font-size:.78rem;font-weight:600;white-space:normal;min-width:110px}
+.gt tr.err .msg{color:var(--err-tx)}.gt tr.warn .msg{color:var(--warn-tx)}.gt tr.ok .msg{color:var(--ok-tx)}
+.gt .x{background:none;border:none;color:var(--red);cursor:pointer;font-size:1.05rem;min-height:36px;min-width:34px;border-radius:8px}
+.gt .x:hover{background:var(--alt)}
+.gt td.idx{color:var(--muted);font-size:.75rem;text-align:center;width:30px}
+.gpanel .ayuda{font-size:.8rem;color:var(--muted);line-height:1.5;margin-top:12px}
+.gpanel .resumen{display:flex;gap:16px;flex-wrap:wrap;font-size:.88rem;color:var(--muted2);margin-bottom:10px}
+.gpanel .resumen b{color:var(--text)}
+@media(min-width:760px){.gpanel>.btn{display:block;width:auto;min-width:300px;margin-left:auto}}
+#confLista .card{max-width:min(1200px,96vw)!important}
+
+@media(max-width:1299px){.gt{min-width:1180px}}
 </style>
 </head>
 <body>
-<header>
-  <button class="btn-s hidden" id="btnInstalar" style="position:absolute;right:max(16px,env(safe-area-inset-right));top:calc(6px + env(safe-area-inset-top));background:var(--amber);color:#12161F;border:none;min-height:34px;padding:6px 14px">Instalar app</button><div class="wrap">
-  <h1>Control de Entregas</h1>
-  <div class="tabs" id="tabs">
-    <button class="tab active" data-t="reg">Registrar</button>
-    <button class="tab" data-t="lista">Registros</button>
-    <button class="tab" data-t="ing">Ingresos</button>
-    <button class="tab" data-t="cfg">Config</button>
+<header class="top">
+ <div class="wrap bar">
+  <div class="brand"><h1>Control de Entregas</h1><button class="btn-s hidden" id="btnInstalar" type="button">Instalar app</button></div>
+  <nav class="tabs" id="tabs" aria-label="Secciones">
+    <button class="tab active" data-t="reg" type="button">Registrar</button>
+    <button class="tab" data-t="lista" type="button">Registros</button>
+    <button class="tab" data-t="ing" type="button">Ingresos</button>
+    <button class="tab" data-t="cfg" type="button">Config</button>
+  </nav>
+  <div class="ctx" id="ctx">
+    <div class="ctxg" id="ctxReg">
+      <div class="cf"><label for="fecha">Fecha de registro</label><input type="date" id="fecha"/></div>
+      <div class="cf"><label for="nombre">Habilitador</label><select id="nombre"></select></div>
+      <div class="cf"><label>Turno</label><div class="chips seg" id="turnoChips"><button class="chip active" data-v="Día" type="button">Día</button><button class="chip" data-v="Noche" type="button">Noche</button></div></div>
+    </div>
+    <div class="ctxg hidden" id="ctxIng">
+      <div class="cf"><label for="iFecha">Fecha de ingreso</label><input type="date" id="iFecha"/></div>
+      <div class="cf"><label for="iNombre">Habilitador</label><select id="iNombre"></select></div>
+      <div class="cf"><label>Turno</label><div class="chips seg" id="iTurno"><button class="chip active" data-v="Día" type="button">Día</button><button class="chip" data-v="Noche" type="button">Noche</button></div></div>
+    </div>
   </div>
-</div></header>
+ </div>
+</header>
 
 <main class="wrap">
 
@@ -152,39 +213,32 @@ input[type=date]{-webkit-appearance:none;appearance:none}
 <div id="t-reg">
 <div class="panel" id="despachoBar">
   <div class="sec">Despacho</div>
-  <div class="field"><label>Habilitador</label><select id="nombre"></select></div>
-  <div class="tools" id="cargaDespacho">
-    <button class="btn-s" id="planImp">Cargar lista de despacho (Excel SAP, CANT)</button>
-    <button class="btn-s" id="planOpImp">Cargar lista por OP (Excel OP, cantidad)</button>
-    <button class="btn-s hidden" id="planBorrar">Quitar lista</button>
-    <button class="btn-s hidden" id="planOpBorrar">Quitar lista OP</button>
-    <input type="file" id="planFile" accept=".xlsx,.xls,.csv" class="hidden"/>
-    <input type="file" id="planOpFile" accept=".xlsx,.xls,.csv" class="hidden"/>
+  <div class="despRow">
+    <div class="field"><label for="fdesp">Fecha de despacho</label><input type="date" id="fdesp"/></div>
+    <div class="tools" id="cargaDespacho">
+      <button class="btn-s" id="planImp" type="button">Cargar lista de despacho (Excel SAP, CANT)</button>
+      <button class="btn-s" id="planOpImp" type="button">Cargar lista por OP (Excel OP, cantidad)</button>
+      <button class="btn-s hidden" id="planBorrar" type="button">Quitar lista</button>
+      <button class="btn-s hidden" id="planOpBorrar" type="button">Quitar lista OP</button>
+      <input type="file" id="planFile" accept=".xlsx,.xls,.csv" class="hidden"/>
+      <input type="file" id="planOpFile" accept=".xlsx,.xls,.csv" class="hidden"/>
+    </div>
   </div>
-  <div class="row2">
-    <div class="field"><label>Fecha de despacho</label><input type="date" id="fdesp"/></div>
-    <div class="field"><label>Fecha de registro</label><input type="date" id="fecha"/></div>
-  </div>
-  <div class="chips" id="turnoChips" style="margin-bottom:6px">
-    <button class="chip active" data-v="Día">Turno Día</button>
-    <button class="chip" data-v="Noche">Turno Noche</button>
-  </div>
-  <div id="despachoInfo" style="font-size:.76rem;color:var(--muted)"></div>
-  <div id="planRes" style="margin-top:10px"></div>
-  <div id="planOpRes" style="margin-top:10px"></div>
+  <div id="despachoInfo" class="info"></div>
+  <div class="plans"><div id="planRes"></div><div id="planOpRes"></div></div>
 </div>
-<div class="chips" id="modoReg" style="margin-bottom:10px"><button class="chip active" data-v="tabla">Tabla rápida (tipo Excel)</button><button class="chip" data-v="form">Formulario</button></div>
-<div id="gridPanel" class="panel">
+<div class="chips modo" id="modoReg"><button class="chip active" data-v="tabla" type="button">Tabla rápida (tipo Excel)</button><button class="chip" data-v="form" type="button">Formulario</button></div>
+<div id="gridPanel" class="panel gpanel">
   <div class="sec">Registro rápido</div>
   <div class="resumen" id="gResumen"></div>
   <div class="tools" style="margin-bottom:0">
-    <button class="btn-s" id="gAdd">+ Fila</button>
-    <button class="btn-s" id="gTraer">Traer OPs pendientes del día</button>
-    <button class="btn-s" id="gLimpiar">Vaciar tabla</button>
+    <button class="btn-s" id="gAdd" type="button">+ Fila</button>
+    <button class="btn-s" id="gTraer" type="button">Traer OPs pendientes del día</button>
+    <button class="btn-s" id="gLimpiar" type="button">Vaciar tabla</button>
   </div>
   <div class="gwrap"><table class="gt"><thead><tr><th>#</th><th>OP</th><th>Modelo</th><th>Cliente</th><th>SAP</th><th>Descripción</th><th class="n">Pedido</th><th class="n">Ya entreg.</th><th>Empaque</th><th class="n">Unid. x emp.</th><th class="n">Cant.</th><th class="n">Total</th><th>Estado</th><th></th></tr></thead><tbody id="gBody"></tbody></table></div>
   <datalist id="dlOps"></datalist>
-  <button class="btn" id="gGuardar">Guardar filas listas</button>
+  <button class="btn" id="gGuardar" type="button">Guardar filas listas</button>
   <div class="ayuda">Enter o Tab: siguiente celda · Enter en la última celda: nueva fila · Flechas ↑ ↓: cambiar de fila · Ctrl+Enter: guardar · Puedes pegar desde Excel columnas OP, Unid., Cant. en la celda OP. La tabla se guarda sola como borrador por fecha de despacho.</div>
 </div>
 <div id="regForm" class="panel">
@@ -196,21 +250,19 @@ input[type=date]{-webkit-appearance:none;appearance:none}
     <div class="field"><label>Cliente</label><input type="text" id="cliente" placeholder="Se autocompleta con la OP"/></div>
     <div class="field"><label>Código SAP</label><input type="text" id="sap" class="mono" placeholder="Según modelo"/></div>
   </div>
-
-    </div>
+  </div>
   <div class="fcol">
   <div class="sec">Pedido y entrega</div>
   <div class="field"><label>Cantidad pedida de la OP (unidades)</label><input type="number" min="0" id="q-p" class="mono" placeholder="0"/></div>
-  <div id="opAcum" style="font-size:.76rem;color:var(--muted2);margin:-6px 0 10px"></div>
+  <div id="opAcum" class="info" style="margin:-6px 0 12px"></div>
   <label>Entregado</label>
-  <div class="chips" id="emp-tipo"><button class="chip active" data-v="caja">Caja</button><button class="chip" data-v="paquete">Paquete</button></div>
+  <div class="chips" id="emp-tipo"><button class="chip active" data-v="caja" type="button">Caja</button><button class="chip" data-v="paquete" type="button">Paquete</button></div>
   <div class="row2">
     <div class="field"><label>Unid. x caja</label><input type="number" min="0" id="q-u" class="mono" placeholder="0"/></div>
     <div class="field"><label>Cant. cajas</label><input type="number" min="0" id="q-c" class="mono" placeholder="0"/></div>
   </div>
   <div class="total"><span>Total entregado</span><b class="mono" id="q-t">0</b></div>
-
-  <button class="btn" id="guardar">Guardar entrada</button>
+  <button class="btn" id="guardar" type="button">Guardar entrada</button>
   </div>
 </div>
 <div id="despachoRes"></div>
@@ -220,43 +272,45 @@ input[type=date]{-webkit-appearance:none;appearance:none}
 <div id="t-lista" class="hidden">
   <div class="panel">
     <div class="row2">
-      <div class="field" style="margin:0"><label>Fecha registro</label><input type="date" id="fFecha"/></div>
-      <div class="field" style="margin:0"><label>Fecha despacho</label><input type="date" id="fDesp"/></div>
-      <div class="field" style="margin:0"><label>Turno</label><select id="fTurno"><option value="">Todos</option><option>Día</option><option>Noche</option></select></div>
+      <div class="field"><label>Fecha registro</label><input type="date" id="fFecha"/></div>
+      <div class="field"><label>Fecha despacho</label><input type="date" id="fDesp"/></div>
+      <div class="field"><label>Turno</label><select id="fTurno"><option value="">Todos</option><option>Día</option><option>Noche</option></select></div>
     </div>
-    <div class="row2" style="margin-top:10px">
-      <div class="field" style="margin:0"><label>Habilitador</label><select id="fNombre"><option value="">Todos</option></select></div>
-      <div class="field" style="margin:0"><label>Estado</label><select id="fEstado"><option value="">Todos</option><option>COMPLETO</option><option>INCOMPLETO</option></select></div>
+    <div class="row2">
+      <div class="field"><label>Habilitador</label><select id="fNombre"><option value="">Todos</option></select></div>
+      <div class="field"><label>Estado</label><select id="fEstado"><option value="">Todos</option><option>COMPLETO</option><option>INCOMPLETO</option></select></div>
     </div>
-    <div class="field" style="margin:10px 0 0"><label>Buscar (OP, SAP, cliente, descripción)</label><input type="text" id="fTexto"/></div>
+    <div class="field"><label>Buscar (OP, SAP, cliente, descripción)</label><input type="text" id="fTexto"/></div>
   </div>
-  <div class="chips" id="vistaChips" style="max-width:440px"><button class="chip active" data-v="lista">Entradas</button><button class="chip" data-v="resumen">Resumen por OP / SAP</button></div>
+  <div class="chips modo" id="vistaChips"><button class="chip active" data-v="lista" type="button">Entradas</button><button class="chip" data-v="resumen" type="button">Resumen por OP / SAP</button></div>
   <div class="tools">
-    <button class="btn-s" id="exp">Excel</button>
-    <button class="btn-s" id="imp">Imprimir</button>
-    <button class="btn-s" id="envSb">Enviar a Sheets</button>
-    <button class="btn-s" id="traeSb">Traer de Sheets</button>
-    <button class="btn-s" id="limpiarFiltro">Quitar filtros</button>
-    <span id="cuenta" style="font-size:.74rem;color:var(--muted);align-self:center"></span>
+    <button class="btn-s" id="exp" type="button">Excel</button>
+    <button class="btn-s" id="imp" type="button">Imprimir</button>
+    <button class="btn-s" id="envSb" type="button">Enviar a Sheets</button>
+    <button class="btn-s" id="traeSb" type="button">Traer de Sheets</button>
+    <button class="btn-s" id="limpiarFiltro" type="button">Quitar filtros</button>
+    <span id="cuenta"></span>
   </div>
   <div id="lista"></div>
 </div>
 
 <!-- INGRESOS A ALMACÉN -->
 <div id="t-ing" class="hidden">
-<div class="panel">
-  <div class="sec">Ingreso a almacén</div>
-  <div class="row2">
-    <div class="field"><label>Fecha</label><input type="date" id="iFecha"/></div>
-    <div class="field"><label>Habilitador</label><select id="iNombre"></select></div>
+<div class="chips modo" id="imodoReg"><button class="chip active" data-v="tabla" type="button">Tabla rápida (tipo Excel)</button><button class="chip" data-v="form" type="button">Formulario</button></div>
+<div id="igPanel" class="panel gpanel">
+  <div class="sec">Ingreso rápido a almacén</div>
+  <div class="resumen" id="igResumen"></div>
+  <div class="tools" style="margin-bottom:0">
+    <button class="btn-s" id="igAdd" type="button">+ Fila</button>
+    <button class="btn-s" id="igLimpiar" type="button">Vaciar tabla</button>
   </div>
-  <div class="chips" id="iTurno" style="margin-bottom:6px">
-    <button class="chip active" data-v="Día">Turno Día</button>
-    <button class="chip" data-v="Noche">Turno Noche</button>
-  </div>
+  <div class="gwrap"><table class="gt"><thead><tr><th>#</th><th>OP</th><th>Modelo</th><th>Cliente</th><th>SAP</th><th>Descripción</th><th>Empaque</th><th class="n">Unid. x emp.</th><th class="n">Cant.</th><th class="n">Total</th><th>Estado</th><th></th></tr></thead><tbody id="igBody"></tbody></table></div>
+  <button class="btn" id="igGuardar" type="button">Guardar filas listas</button>
+  <div class="ayuda">Enter o Tab: siguiente celda · Enter en la última celda: nueva fila · Flechas ↑ ↓: cambiar de fila · Ctrl+Enter: guardar · Puedes pegar desde Excel columnas OP, Unid., Cant. en la celda OP. La tabla se guarda sola como borrador por fecha de ingreso.</div>
 </div>
 <div id="ingForm" class="panel">
   <div class="fcol">
+  <div class="sec">Ingreso a almacén</div>
   <div class="field"><label>OP</label><input type="text" id="iOp" class="mono" placeholder="Ej. OP-10234" autocomplete="off"/><div class="sug hidden" id="iSug"></div></div>
   <div id="iModelos" class="chips hidden" style="flex-wrap:wrap"></div>
   <div class="field"><label>Descripción</label><input type="text" id="iDesc" placeholder="Se autocompleta con la OP"/></div>
@@ -267,32 +321,32 @@ input[type=date]{-webkit-appearance:none;appearance:none}
   </div>
   <div class="fcol">
   <div class="sec">Cantidad ingresada</div>
-  <div class="chips" id="iEmpTipo"><button class="chip active" data-v="caja">Caja</button><button class="chip" data-v="paquete">Paquete</button></div>
+  <div class="chips" id="iEmpTipo"><button class="chip active" data-v="caja" type="button">Caja</button><button class="chip" data-v="paquete" type="button">Paquete</button></div>
   <div class="row2">
     <div class="field"><label>Unid. x caja</label><input type="number" min="0" id="iU" class="mono" placeholder="0"/></div>
     <div class="field"><label>Cant. cajas</label><input type="number" min="0" id="iC" class="mono" placeholder="0"/></div>
   </div>
   <div class="total"><span>Total ingresado</span><b class="mono" id="iT">0</b></div>
-  <button class="btn" id="iGuardar">Guardar ingreso</button>
+  <button class="btn" id="iGuardar" type="button">Guardar ingreso</button>
   </div>
 </div>
 <div class="panel" id="iFiltros">
   <div class="row2">
-    <div class="field" style="margin:0"><label>Fecha</label><input type="date" id="iFFecha"/></div>
-    <div class="field" style="margin:0"><label>Turno</label><select id="iFTurno"><option value="">Todos</option><option>Día</option><option>Noche</option></select></div>
+    <div class="field"><label>Fecha</label><input type="date" id="iFFecha"/></div>
+    <div class="field"><label>Turno</label><select id="iFTurno"><option value="">Todos</option><option>Día</option><option>Noche</option></select></div>
   </div>
-  <div class="row2" style="margin-top:10px">
-    <div class="field" style="margin:0"><label>Habilitador</label><select id="iFNombre"><option value="">Todos</option></select></div>
-    <div class="field" style="margin:0"><label>Buscar (OP, SAP, cliente…)</label><input type="text" id="iFTexto"/></div>
+  <div class="row2">
+    <div class="field"><label>Habilitador</label><select id="iFNombre"><option value="">Todos</option></select></div>
+    <div class="field"><label>Buscar (OP, SAP, cliente…)</label><input type="text" id="iFTexto"/></div>
   </div>
 </div>
 <div class="tools">
-  <button class="btn-s" id="iExp">Excel</button>
-  <button class="btn-s" id="iImp">Imprimir</button>
-  <button class="btn-s" id="iEnv">Enviar a Sheets</button>
-  <button class="btn-s" id="iTraer">Traer de Sheets</button>
-  <button class="btn-s" id="iLimpiar">Quitar filtros</button>
-  <span id="iCuenta" style="font-size:.74rem;color:var(--muted)"></span>
+  <button class="btn-s" id="iExp" type="button">Excel</button>
+  <button class="btn-s" id="iImp" type="button">Imprimir</button>
+  <button class="btn-s" id="iEnv" type="button">Enviar a Sheets</button>
+  <button class="btn-s" id="iTraer" type="button">Traer de Sheets</button>
+  <button class="btn-s" id="iLimpiar" type="button">Quitar filtros</button>
+  <span id="iCuenta"></span>
 </div>
 <div id="iLista"></div>
 </div>
@@ -302,23 +356,23 @@ input[type=date]{-webkit-appearance:none;appearance:none}
   <div class="panel">
     <div class="sec">Habilitadores</div>
     <textarea id="nombresTxt" rows="2" placeholder="Uno por línea o separados por coma"></textarea>
-    <button class="btn sec2" id="addNombres" style="margin-top:8px">Agregar habilitadores</button>
+    <button class="btn sec2" id="addNombres" type="button" style="margin-top:8px">Agregar habilitadores</button>
     <div id="nombresLista" style="margin-top:10px"></div>
   </div>
   <div class="panel hidden">
     <div class="sec">Instalación de la app (PWA)</div>
-    <div id="pwaDiag" style="font-size:.78rem;color:var(--muted2);line-height:1.35"></div>
-    <button class="btn-s" id="pwaRevisar" style="margin-top:8px">Revisar de nuevo</button>
+    <div id="pwaDiag" style="font-size:.85rem;color:var(--muted2);line-height:1.4"></div>
+    <button class="btn-s" id="pwaRevisar" type="button" style="margin-top:8px">Revisar de nuevo</button>
   </div>
   <div class="panel">
     <div class="sec">Catálogo de OP</div>
-    <p id="catInfo" style="font-size:.78rem;color:var(--muted);margin:0 0 8px"></p>
+    <p id="catInfo" class="info" style="margin:0 0 10px"></p>
     <div class="tools">
-      <button class="btn-s" id="actCat">Actualizar desde Sheets</button>
-      <button class="btn-s" id="impCat">Importar Excel</button>
+      <button class="btn-s" id="actCat" type="button">Actualizar desde Sheets</button>
+      <button class="btn-s" id="impCat" type="button">Importar Excel</button>
       <input type="file" id="file" accept=".xlsx,.xls,.csv" class="hidden"/>
     </div>
-    <p style="font-size:.68rem;color:var(--muted);margin:0">Hoja principal: OP, Descripción, Cliente, SAP. Hoja de modelos: OP, Modelo, Cantidad, Código SAP. Doble toque en "Actualizar" cambia los links.</p>
+    <p class="info" style="margin:0;font-size:.78rem">Hoja principal: OP, Descripción, Cliente, SAP. Hoja de modelos: OP, Modelo, Cantidad, Código SAP. Doble toque en "Actualizar" cambia los links.</p>
   </div>
 </div>
 
@@ -461,7 +515,7 @@ function tarjetaOp(o){var d=document.createElement("div");d.className="card";
     +'<div class="meta">Entregado en esta vista: <strong>'+o.ent+' u</strong> · Acumulado del despacho: <strong>'+o.acum+' u</strong> · Pendiente: <strong>'+Math.max(pd,0)+' u</strong>'+(pd<0&&o.pedido>0?' · Excedente: <strong style="color:var(--red)">'+(-pd)+' u</strong>':'')+'</div>'+lin;
   return d}
 function tarjetaSap(x){var d=document.createElement("div");d.className="card";
-  d.innerHTML='<div class="top"><div><span class="op mono">SAP '+esc(x.sap||"—")+'</span></div><span class="badge" style="background:var(--inp)">'+x.ent+' u</span></div><div style="font-size:.88rem;margin:4px 0 2px">'+esc(x.desc)+'</div><div class="meta">Despacho: <strong>'+fcorta(x.fdesp)+'</strong> · OP: '+esc(Object.keys(x.ops).join(", "))+'</div>';
+  d.innerHTML='<div class="top"><div><span class="op mono">SAP '+esc(x.sap||"—")+'</span></div><span class="badge">'+x.ent+' u</span></div><div style="font-size:.88rem;margin:4px 0 2px">'+esc(x.desc)+'</div><div class="meta">Despacho: <strong>'+fcorta(x.fdesp)+'</strong> · OP: '+esc(Object.keys(x.ops).join(", "))+'</div>';
   return d}
 function renderResumen(c,rs){
   if(!rs.length){c.innerHTML='<div class="empty">Sin registros.</div>';return}
@@ -934,7 +988,7 @@ function gModSel(i){var r=grid[i],m=buscar(r.op),td=document.querySelector('#gBo
   var h='<select data-r="'+i+'" data-f="mod"><option value="all">Todos juntos</option>';m.modelos.forEach(function(mo,k){h+='<option value="'+k+'">'+esc(mo.modelo||mo.descripcion)+'</option>'});td.innerHTML=h+'</select>';
   td.firstChild.value=r.mod;if(td.firstChild.value!==r.mod){r.mod="all";td.firstChild.value="all"}}
 function gRender(){gDl();var b=$("gBody");b.innerHTML="";grid.forEach(function(r,i){var tr=document.createElement("tr");tr.dataset.i=i;
-  tr.innerHTML='<td class="idx">'+(i+1)+'</td><td><input data-r="'+i+'" data-f="op" class="mono" list="dlOps" autocomplete="off" style="width:130px" value="'+esc(r.op)+'"/></td><td class="mod"></td>'+
+  tr.innerHTML='<td class="idx">'+(i+1)+'</td><td><input data-r="'+i+'" data-f="op" class="mono" list="dlOps" autocomplete="off" value="'+esc(r.op)+'"/></td><td class="mod"></td>'+
   '<td class="ro cli"></td><td class="ro mono sap"></td><td class="ro desc"></td>'+
   '<td><input data-r="'+i+'" data-f="pedido" class="n mono" type="number" min="0" inputmode="numeric"/></td><td class="num prev"></td>'+
   '<td><select data-r="'+i+'" data-f="emp"><option value="caja">Caja</option><option value="paquete">Paquete</option></select></td>'+
@@ -1005,7 +1059,104 @@ grupo("modoReg",gModo);gModo(ld("ctrl_modo_reg","tabla"));
 $("fdesp").addEventListener("change",gCargar);
 (function(){var _rl=renderLista;renderLista=function(){_rl.apply(this,arguments);gDl();gActualizar()}})();
 gCargar();
+// ===== Tabla rápida de ingresos (misma mecánica que la de registro; guarda igual que el formulario) =====
+var K_IGRID="ctrl_grid_ing_",igrid=[],igGuardando=false,igCatN=-1;
+function igKey(){return K_IGRID+($("iFecha").value||"x")}
+function igNueva(op){return {op:op||"",mod:"",emp:iEmp,u:"",c:""}}
+function igVacia(r){return !r.op&&!r.u&&!r.c}
+function igBorrador(){sv(igKey(),igrid.filter(function(r){return !igVacia(r)}))}
+function igCargar(){igrid=ld(igKey(),[]);if(!Array.isArray(igrid))igrid=[];igrid.push(igNueva());igRender()}
+function igModelo(r,m){if(!m)return null;var ms=m.modelos||[];if(!ms.length)return {sap:"",desc:m.descripcion||""};
+  if(ms.length===1)return {sap:ms[0].sap||"",desc:ms[0].descripcion||""};
+  var x=r.mod===""?null:ms[parseInt(r.mod,10)];return x?{sap:x.sap||"",desc:x.descripcion||""}:null}
+function igInfo(i){var r=igrid[i],o={err:[],warn:[]};o.vacia=igVacia(r);if(o.vacia)return o;
+  var op=r.op.trim(),u=parseInt(r.u,10)||0,c=parseInt(r.c,10)||0;o.m=buscar(op);o.mo=igModelo(r,o.m);o.total=u*c;
+  if(!op)o.err.push("Falta OP");else if(!o.m)o.warn.push("OP no está en Sheets");
+  if(o.m&&(o.m.modelos||[]).length>1&&r.mod==="")o.err.push("Elige modelo");
+  if(!(u>0))o.err.push("Falta unid.");if(!(c>0))o.err.push("Falta cant.");
+  var dup=false;for(var j=0;j<i;j++){var g=igrid[j];if(op&&u>0&&g.op.trim().toLowerCase()===op.toLowerCase()&&g.mod===r.mod&&(parseInt(g.u,10)||0)===u&&(parseInt(g.c,10)||0)===c)dup=true}
+  if(dup)o.warn.push("Repetida en la tabla");
+  var f=$("iFecha").value;
+  var rec=op&&ingresos.find(function(x){return String(x.op).toLowerCase()===op.toLowerCase()&&x.fecha===f&&x.u===u&&x.c===c&&x.total>0&&(Date.now()-new Date(x.creado).getTime())<15*60000});
+  if(rec)o.warn.push("Igual a un ingreso de hace poco");
+  return o}
+function igCelda(i,f){return document.querySelector('#igBody [data-r="'+i+'"][data-f="'+f+'"]')}
+function igModSel(i){var r=igrid[i],m=buscar(r.op),td=document.querySelector('#igBody tr[data-i="'+i+'"] td.mod');if(!td)return;
+  if(!m||(m.modelos||[]).length<2){td.innerHTML='<span class="dash">—</span>';r.mod="";return}
+  var h='<select data-r="'+i+'" data-f="mod"><option value="">Elige modelo…</option>';
+  m.modelos.forEach(function(mo,k){h+='<option value="'+k+'">'+esc(mo.modelo||mo.descripcion)+'</option>'});td.innerHTML=h+'</select>';
+  td.firstChild.value=r.mod;if(td.firstChild.value!==r.mod){r.mod="";td.firstChild.value=""}}
+function igRender(){gDl();igCatN=catalogo.length;var b=$("igBody");b.innerHTML="";
+  igrid.forEach(function(r,i){var tr=document.createElement("tr");tr.dataset.i=i;
+    tr.innerHTML='<td class="idx">'+(i+1)+'</td><td><input data-r="'+i+'" data-f="op" class="mono" list="dlOps" autocomplete="off" value="'+esc(r.op)+'"/></td><td class="mod"></td>'+
+    '<td class="ro cli"></td><td class="ro mono sap"></td><td class="ro desc"></td>'+
+    '<td><select data-r="'+i+'" data-f="emp"><option value="caja">Caja</option><option value="paquete">Paquete</option></select></td>'+
+    '<td><input data-r="'+i+'" data-f="u" class="n mono" type="number" min="0" inputmode="numeric" value="'+esc(r.u)+'"/></td>'+
+    '<td><input data-r="'+i+'" data-f="c" class="n mono" type="number" min="0" inputmode="numeric" value="'+esc(r.c)+'"/></td>'+
+    '<td class="num tot"></td><td class="msg"></td><td><button class="x" type="button" data-del="'+i+'" title="Quitar fila">✕</button></td>';
+    b.appendChild(tr);tr.querySelector('[data-f="emp"]').value=r.emp||"caja";igModSel(i)});igActualizar()}
+function igActualizar(){var listas=0,conErr=0,uds=0;
+  igrid.forEach(function(r,i){var tr=document.querySelector('#igBody tr[data-i="'+i+'"]');if(!tr)return;var o=igInfo(i);var q=function(s){return tr.querySelector(s)};
+    if(o.vacia){tr.className="";["cli","sap","desc","tot","msg"].forEach(function(c){q("td."+c).textContent=""});return}
+    q("td.cli").textContent=o.m?o.m.cliente||"":"";q("td.sap").textContent=o.mo?o.mo.sap:"";q("td.desc").textContent=o.mo?o.mo.desc:"";q("td.tot").textContent=o.total;
+    var msg=o.err.length?o.err.join(" · "):o.warn.length?o.warn.join(" · "):"Listo";
+    q("td.msg").textContent=msg;tr.className=o.err.length?"err":o.warn.length?"warn":"ok";
+    if(o.err.length)conErr++;else{listas++;uds+=o.total}});
+  $("igResumen").innerHTML="Filas listas: <b>"+listas+"</b> · Con errores: <b>"+conErr+"</b> · Unidades a ingresar: <b>"+uds+"</b>";
+  $("igGuardar").textContent=listas?"Guardar "+listas+" fila(s) lista(s)":"Guardar filas listas";$("igGuardar").disabled=!listas||igGuardando;$("igGuardar").style.opacity=listas?1:.5}
+function igFoco(i,f){var e=igCelda(i,f)||igCelda(i,"op");if(e){e.focus();if(e.select&&e.type!=="select-one")try{e.select()}catch(x){}}}
+var IG_ORDEN=["op","mod","emp","u","c"];
+function igSiguiente(i,f){var k=IG_ORDEN.indexOf(f);for(var n=k+1;n<IG_ORDEN.length;n++){if(igCelda(i,IG_ORDEN[n])){igFoco(i,IG_ORDEN[n]);return}}
+  if(i===igrid.length-1){igrid.push(igNueva());igRender()}igFoco(i+1,"op")}
+$("igBody").addEventListener("input",function(e){var t=e.target,i=+t.dataset.r,f=t.dataset.f;if(isNaN(i)||!f)return;igrid[i][f]=t.value;
+  if(f==="op"){var m=buscar(t.value);if(m&&m.op!==t.value){t.value=m.op;igrid[i].op=m.op}igrid[i].mod="";igModSel(i)}
+  if(i===igrid.length-1&&!igVacia(igrid[i])){igrid.push(igNueva());igRender();igFoco(i,f);var el=igCelda(i,f);if(el&&el.setSelectionRange&&el.type==="text")el.setSelectionRange(el.value.length,el.value.length)}
+  igActualizar();igBorrador()});
+$("igBody").addEventListener("change",function(e){var t=e.target;if(t.tagName==="SELECT"){igrid[+t.dataset.r][t.dataset.f]=t.value;igActualizar();igBorrador()}});
+$("igBody").addEventListener("keydown",function(e){var t=e.target,i=+t.dataset.r,f=t.dataset.f;if(isNaN(i)||!f)return;
+  if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();igGuardarTodo();return}
+  if(e.key==="Enter"){e.preventDefault();igSiguiente(i,f);return}
+  if(t.tagName!=="SELECT"&&(e.key==="ArrowDown"||e.key==="ArrowUp")){if(f==="op"&&t.list&&t.value&&e.key==="ArrowDown"&&!buscar(t.value))return;e.preventDefault();var n=i+(e.key==="ArrowDown"?1:-1);if(n<0)return;if(n>=igrid.length){igrid.push(igNueva());igRender()}igFoco(n,f)}});
+$("igBody").addEventListener("paste",function(e){var t=e.target;if(t.dataset.f!=="op")return;var tx=(e.clipboardData||window.clipboardData).getData("text");if(!/[\t\n]/.test(tx))return;e.preventDefault();
+  var i=+t.dataset.r,ls=tx.replace(/\r/g,"").split("\n").filter(function(l){return l.trim()});
+  ls.forEach(function(l,k){var c=l.split("\t");var r=igrid[i+k];if(!r){r=igNueva();igrid.push(r)}var m=buscar(c[0]);r.op=m?m.op:String(c[0]||"").trim();r.mod="";
+    if(c[1]!=null&&c[1]!=="")r.u=String(parseInt(c[1],10)||"");if(c[2]!=null&&c[2]!=="")r.c=String(parseInt(c[2],10)||"")});
+  if(!igVacia(igrid[igrid.length-1]))igrid.push(igNueva());igRender();igBorrador();toast("ok",ls.length+" fila(s) pegadas")});
+$("igBody").addEventListener("click",function(e){var b=e.target.closest("[data-del]");if(!b)return;var i=+b.dataset.del;
+  if(!igVacia(igrid[i])&&!confirm("¿Quitar la fila "+(i+1)+"?"))return;igrid.splice(i,1);if(!igrid.length||!igVacia(igrid[igrid.length-1]))igrid.push(igNueva());igRender();igBorrador()});
+$("igAdd").addEventListener("click",function(){if(!igVacia(igrid[igrid.length-1]||{op:"x"})){igrid.push(igNueva());igRender()}igFoco(igrid.length-1,"op")});
+$("igLimpiar").addEventListener("click",function(){if(igrid.some(function(r){return !igVacia(r)})&&!confirm("¿Vaciar toda la tabla?"))return;igrid=[igNueva()];igRender();igBorrador()});
+function igGuardarTodo(){if(igGuardando)return;
+  if(!$("iFecha").value){toast("error","Pon la fecha");$("iFecha").focus();return}
+  if(!$("iNombre").value){toast("error","Selecciona el habilitador");$("iNombre").focus();return}
+  var ok=[],avisos=[],errs=0;igrid.forEach(function(r,i){var o=igInfo(i);if(o.vacia)return;if(o.err.length){errs++;return}ok.push({i:i,r:r,o:o});if(o.warn.length)avisos.push("Fila "+(i+1)+" ("+r.op+"): "+o.warn.join(", "))});
+  if(!ok.length){toast("error","Ninguna fila está lista. Revisa las marcadas en rojo");return}
+  if(avisos.length&&!confirm("Revisa antes de guardar:\n\n"+avisos.join("\n")+"\n\n¿Guardar de todas formas?"))return;
+  if(!confirm("Se guardarán "+ok.length+" ingreso(s) del "+fcorta($("iFecha").value)+(errs?"\n("+errs+" fila(s) con errores quedan en la tabla)":"")+".\n¿Confirmar?"))return;
+  igGuardando=true;var t0=Date.now(),nuevos=[];
+  ok.forEach(function(x,k){var r=x.r,o=x.o;
+    var n={id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("iFecha").value,turno:iTurno,nombre:$("iNombre").value,op:o.m?o.m.op:r.op.trim(),sap:o.mo?o.mo.sap:"",descripcion:o.mo?o.mo.desc:"",cliente:o.m?o.m.cliente||"":"",
+      empaque:r.emp||"caja",u:parseInt(r.u,10)||0,c:parseInt(r.c,10)||0,creado:new Date(t0+k).toISOString(),sync:false};n.total=n.u*n.c;nuevos.push(n)});
+  ingresos=nuevos.slice().reverse().concat(ingresos);sv(K_ING,ingresos);
+  var idx=ok.map(function(x){return x.i});igrid=igrid.filter(function(r,i){return idx.indexOf(i)<0&&!igVacia(r)});igrid.push(igNueva());
+  igGuardando=false;igRender();igBorrador();renderIng();enviarIng(nuevos);toast("ok",nuevos.length+" ingreso(s) guardados"+(errs?" · "+errs+" con errores pendientes":""));igFoco(igrid.length-1,"op")}
+$("igGuardar").addEventListener("click",igGuardarTodo);
+function igModo(v){sv("ctrl_modo_ing",v);$("igPanel").classList.toggle("hidden",v!=="tabla");$("ingForm").classList.toggle("hidden",v==="tabla");
+  document.querySelectorAll("#imodoReg .chip").forEach(function(c){c.classList.toggle("active",c.dataset.v===v)})}
+grupo("imodoReg",igModo);igModo(ld("ctrl_modo_ing","tabla"));
+$("iFecha").addEventListener("change",igCargar);
+(function(){var _ri=renderIng;renderIng=function(){_ri.apply(this,arguments);gDl();
+  if(igCatN!==catalogo.length&&!($("igBody").contains(document.activeElement))){igCatN=catalogo.length;igrid.forEach(function(r,i){igModSel(i)})}
+  igActualizar()}})();
+igCargar();
 })();
 </script>
+<script>
+// Muestra en la barra superior los datos de turno que corresponden a la pestaña activa
+(function(){var c=document.getElementById("ctx"),a=document.getElementById("ctxReg"),b=document.getElementById("ctxIng");
+document.querySelectorAll("#tabs .tab").forEach(function(t){t.addEventListener("click",function(){var k=t.dataset.t;
+a.classList.toggle("hidden",k!=="reg");b.classList.toggle("hidden",k!=="ing");c.classList.toggle("hidden",k!=="reg"&&k!=="ing")})})})();
+</script>
+
 </body>
 </html>
