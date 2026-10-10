@@ -136,27 +136,25 @@ input[type=date]{-webkit-appearance:none;appearance:none}
 <div id="t-reg">
 <div class="panel" id="despachoBar">
   <div class="sec">Despacho</div>
+  <div class="field"><label>Habilitador</label><select id="nombre"></select></div>
+  <div class="tools" id="cargaDespacho">
+    <button class="btn-s" id="planImp">Cargar lista de despacho (Excel SAP, CANT)</button>
+    <button class="btn-s" id="planOpImp">Cargar lista por OP (Excel OP, cantidad)</button>
+    <button class="btn-s hidden" id="planBorrar">Quitar lista</button>
+    <button class="btn-s hidden" id="planOpBorrar">Quitar lista OP</button>
+    <input type="file" id="planFile" accept=".xlsx,.xls,.csv" class="hidden"/>
+    <input type="file" id="planOpFile" accept=".xlsx,.xls,.csv" class="hidden"/>
+  </div>
   <div class="row2">
     <div class="field"><label>Fecha de despacho</label><input type="date" id="fdesp"/></div>
     <div class="field"><label>Fecha de registro</label><input type="date" id="fecha"/></div>
   </div>
-  <div class="field"><label>Habilitador</label><select id="nombre"></select></div>
   <div class="chips" id="turnoChips" style="margin-bottom:6px">
     <button class="chip active" data-v="Día">Turno Día</button>
     <button class="chip" data-v="Noche">Turno Noche</button>
   </div>
   <div id="despachoInfo" style="font-size:.76rem;color:var(--muted)"></div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
-    <button class="btn-s" id="planImp">Cargar lista de despacho (Excel SAP, CANT)</button>
-    <button class="btn-s hidden" id="planBorrar">Quitar lista</button>
-    <input type="file" id="planFile" accept=".xlsx,.xls,.csv" class="hidden"/>
-  </div>
   <div id="planRes" style="margin-top:10px"></div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
-    <button class="btn-s" id="planOpImp">Cargar lista por OP (Excel OP, cantidad)</button>
-    <button class="btn-s hidden" id="planOpBorrar">Quitar lista OP</button>
-    <input type="file" id="planOpFile" accept=".xlsx,.xls,.csv" class="hidden"/>
-  </div>
   <div id="planOpRes" style="margin-top:10px"></div>
 </div>
 <div id="regForm" class="panel">
@@ -500,17 +498,17 @@ function leerListaOp(wb,fd){
     for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="op"||h==="orden"||h==="orden de produccion"||h==="o.p."}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;co=x;cc=y;cf=r.findIndex(function(h){return h.indexOf("fecha")===0})}}
     if(hi<0){if(c>3)continue;co=0;cc=1}
     if(c>3&&cf<0)continue;
-    var mp={};for(var k=hi+1;k<a.length;k++){var sp=String(a[k][co]).trim();if(!sp||!num(a[k][cc]))continue;
+    var mp={},orden=[];for(var k=hi+1;k<a.length;k++){var sp=String(a[k][co]).trim();if(!sp||!num(a[k][cc]))continue;
       if(c>3){var fv=a[k][cf],iso="";if(typeof fv==="number"){var d=XLSX.SSF.parse_date_code(fv);if(d)iso=d.y+"-"+String(d.m).padStart(2,"0")+"-"+String(d.d).padStart(2,"0")}else iso=String(fv).slice(0,10);if(iso!==fd)continue}
-      var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp))mp[key]={op:sp,cant:0};mp[key].cant+=q}
-    if(Object.keys(mp).length)return mp}
+      var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp)){mp[key]={op:sp,cant:0};orden.push(key)}mp[key].cant+=q}
+    if(orden.length)return orden.map(function(k){return mp[k]})}
   return null}
 $("planOpBorrar").addEventListener("click",function(){var fd=$("fdesp").value;if(!confirm("\u00bfQuitar la lista por OP del "+fcorta(fd)+"?"))return;delete planesOp[fd];sv(K_PLANOP,planesOp);renderPlanOp()});
 $("planOpFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;var fd=$("fdesp").value;
   var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
-     var mp=leerListaOp(wb,fd);if(mp===null){toast("error","No encontré una lista con OP y cantidad");return}var orden=Object.keys(mp);
+     var orden=leerListaOp(wb,fd);if(orden===null){toast("error","No encontré una lista con OP y cantidad");return}
     if(!orden.length){toast("error","No hay filas con OP");return}
-     confirmarLista(fd,orden.map(function(k){var it=mp[k],m=buscar(it.op);var cs=m&&m.modelos.length?m.modelos.map(function(mo){return {op:m.op,cliente:m.cliente||"",sap:mo.sap||"",desc:mo.descripcion||""}}):[{op:it.op,cliente:"",sap:"",desc:""}];return {cands:cs,cant:it.cant,ok:!!m,key:it.op}}),"OP")}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
+     confirmarLista(fd,orden.map(function(it){var m=buscar(it.op);var cs=m&&m.modelos.length?m.modelos.map(function(mo){return {op:m.op,cliente:m.cliente||"",sap:mo.sap||"",desc:mo.descripcion||""}}):[{op:it.op,cliente:"",sap:"",desc:""}];return {cands:cs,cant:it.cant,ok:!!m,key:it.op}}),"OP")}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
 var listaConf=null;
 function elegidos(r,v){if(v==="sep")return r.cands.slice();if(v==="all"&&r.cands.length>1){var a=r.cands;return [{op:a[0].op,cliente:a[0].cliente,sap:a.map(function(x){return x.sap}).filter(Boolean).join(" + "),desc:a.map(function(x){return x.desc}).join(" + ")}]}return [r.cands[+v||0]]}
 function confirmarLista(fd,rows,tipo){listaConf={fd:fd,rows:rows};var w=$("confLista");if(!w){w=document.createElement("div");w.id="confLista";w.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;display:flex;align-items:center;justify-content:center;padding:12px";document.body.appendChild(w)}
@@ -533,7 +531,7 @@ function aceptarLista(w){var fd=listaConf.fd,rows=listaConf.rows;
   if(!nuevos.length){toast("error",sinOp?"Las filas marcadas no tienen OP en Sheets":"No hay filas marcadas");return}
   var envio=nuevos.slice();
   nuevos.forEach(function(r){registros.forEach(function(x){if(nuevos.indexOf(x)<0&&x.op.toLowerCase()===r.op.toLowerCase()&&(x.fdesp||"")===fd&&x.pedido!==r.pedido){x.pedido=r.pedido;x.sync=false;if(envio.indexOf(x)<0)envio.push(x)}})});
-  nuevos.forEach(function(r){registros.unshift(r)});
+  registros=nuevos.concat(registros);
   Object.keys(ops).forEach(function(op){recalcularEstados(op,fd).forEach(function(x){if(envio.indexOf(x)<0)envio.push(x)})});
   sv(K_REG,registros);w.style.display="none";listaConf=null;renderLista();enviar(envio,true);
   toast("ok",nuevos.length+" tarjeta(s) creadas para el "+fcorta(fd)+(sinOp?" · "+sinOp+" sin OP omitidas":""))}
