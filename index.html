@@ -116,6 +116,22 @@ input[type=date]{-webkit-appearance:none;appearance:none}
 .plan-t td{padding:5px 6px;border-bottom:1px solid var(--border)}
 .plan-t td.n,.plan-t th.n{text-align:right}
 .plan-ok{color:var(--green)}.plan-pend{color:var(--amber)}.plan-exc{color:var(--red)}
+.gwrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin:10px 0}
+.gt{width:100%;border-collapse:collapse;font-size:.8rem;min-width:980px}
+.gt th{position:sticky;top:0;background:var(--alt);color:var(--muted2);font-weight:600;text-align:left;padding:6px;border-bottom:1px solid var(--inp);white-space:nowrap;font-size:.7rem;text-transform:uppercase}
+.gt td{padding:3px 4px;border-bottom:1px solid var(--border);vertical-align:middle}
+.gt td.ro{color:var(--muted2);font-size:.74rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gt input,.gt select{min-height:36px;padding:5px 7px;font-size:14px;border-radius:4px}
+.gt input.n{text-align:right;width:84px}
+.gt td.num{text-align:right;font-family:'IBM Plex Mono',monospace;white-space:nowrap}
+.gt tr.err td{background:rgba(229,62,62,.12)}.gt tr.warn td{background:rgba(242,169,59,.10)}.gt tr.ok td{background:rgba(56,161,105,.08)}
+.gt .msg{font-size:.7rem;white-space:normal;min-width:130px}
+.gt tr.err .msg{color:#FC8181}.gt tr.warn .msg{color:var(--amber)}.gt tr.ok .msg{color:#68D391}
+.gt .x{background:none;border:none;color:var(--red);cursor:pointer;font-size:1rem;min-height:30px}
+.gt td.idx{color:var(--muted);font-size:.7rem;text-align:center;width:26px}
+#gridPanel .ayuda{font-size:.72rem;color:var(--muted);margin-top:4px}
+#gridPanel .resumen{display:flex;gap:14px;flex-wrap:wrap;font-size:.78rem;color:var(--muted2);margin-bottom:8px}
+#gridPanel .resumen b{color:var(--amber)}
 </style>
 </head>
 <body>
@@ -156,6 +172,20 @@ input[type=date]{-webkit-appearance:none;appearance:none}
   <div id="despachoInfo" style="font-size:.76rem;color:var(--muted)"></div>
   <div id="planRes" style="margin-top:10px"></div>
   <div id="planOpRes" style="margin-top:10px"></div>
+</div>
+<div class="chips" id="modoReg" style="margin-bottom:10px"><button class="chip active" data-v="tabla">Tabla rápida (tipo Excel)</button><button class="chip" data-v="form">Formulario</button></div>
+<div id="gridPanel" class="panel">
+  <div class="sec">Registro rápido</div>
+  <div class="resumen" id="gResumen"></div>
+  <div class="tools" style="margin-bottom:0">
+    <button class="btn-s" id="gAdd">+ Fila</button>
+    <button class="btn-s" id="gTraer">Traer OPs pendientes del día</button>
+    <button class="btn-s" id="gLimpiar">Vaciar tabla</button>
+  </div>
+  <div class="gwrap"><table class="gt"><thead><tr><th>#</th><th>OP</th><th>Modelo</th><th>Cliente</th><th>SAP</th><th>Descripción</th><th class="n">Pedido</th><th class="n">Ya entreg.</th><th>Empaque</th><th class="n">Unid. x emp.</th><th class="n">Cant.</th><th class="n">Total</th><th>Estado</th><th></th></tr></thead><tbody id="gBody"></tbody></table></div>
+  <datalist id="dlOps"></datalist>
+  <button class="btn" id="gGuardar">Guardar filas listas</button>
+  <div class="ayuda">Enter o Tab: siguiente celda · Enter en la última celda: nueva fila · Flechas ↑ ↓: cambiar de fila · Ctrl+Enter: guardar · Puedes pegar desde Excel columnas OP, Unid., Cant. en la celda OP. La tabla se guarda sola como borrador por fecha de despacho.</div>
 </div>
 <div id="regForm" class="panel">
   <div class="fcol">
@@ -873,6 +903,108 @@ $("fecha").value=hoy();$("fdesp").value=hoy();pintarNombres();restaurarSesion();
 if(navigator.onLine)setTimeout(function(){actualizarCat(true);enviar(pendientes());enviarIng(pendIng())},500);
 window.addEventListener("online",function(){enviar(pendientes());enviarIng(pendIng())});
 if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(e){window.__swErr=String(e&&e.message||e)})})}
+// ===== Tabla rápida de registro =====
+var K_GRID="ctrl_grid_",grid=[],gGuardando=false,gCatN=-1;
+function gKey(){return K_GRID+(fdActual()||"x")}
+function gNueva(op){return {op:op||"",mod:"all",pedido:"",emp:emp,u:"",c:""}}
+function gVacia(r){return !r.op&&!r.u&&!r.c}
+function gBorrador(){sv(gKey(),grid.filter(function(r){return !gVacia(r)}))}
+function gCargar(){grid=ld(gKey(),[]);if(!Array.isArray(grid))grid=[];grid.push(gNueva());gRender()}
+function gDl(){if(gCatN===catalogo.length)return;gCatN=catalogo.length;var d=$("dlOps");d.innerHTML=catalogo.map(function(c){return '<option value="'+esc(c.op)+'">'+esc((c.cliente||"")+" · "+(c.descripcion||""))+'</option>'}).join("")}
+function gModelo(r,m){if(!m)return null;var ms=m.modelos||[];if(!ms.length)return {sap:"",desc:m.descripcion||""};if(ms.length===1)return {sap:ms[0].sap||"",desc:ms[0].descripcion||""};
+  if(r.mod==="all")return {sap:ms.map(function(x){return x.sap||""}).filter(Boolean).join(" + "),desc:ms.map(function(x){return x.descripcion}).join(" + ")};
+  var x=ms[parseInt(r.mod,10)];return x?{sap:x.sap||"",desc:x.descripcion||""}:null}
+function gInfo(i){var r=grid[i],fd=fdActual(),o={err:[],warn:[]};o.vacia=gVacia(r);if(o.vacia)return o;
+  var op=r.op.trim();o.m=buscar(op);o.mo=gModelo(r,o.m);
+  o.ped=r.pedido!==""?(parseInt(r.pedido,10)||0):(pedidoDe(op,fd)||(o.mo?pedidoPlanSap(o.mo.sap,fd):0)||0);
+  o.total=(parseInt(r.u,10)||0)*(parseInt(r.c,10)||0);
+  var prev=acumulado(op,fd),dup=false;for(var j=0;j<i;j++){var g=grid[j];if(g.op.trim().toLowerCase()===op.toLowerCase()&&op){prev+=(parseInt(g.u,10)||0)*(parseInt(g.c,10)||0);if(g.mod===r.mod)dup=true}}
+  o.prev=prev;
+  if(!op)o.err.push("Falta OP");else if(!o.m)o.warn.push("OP no está en Sheets");
+  if(!(o.ped>0))o.err.push("Falta pedido");
+  if(!(parseInt(r.u,10)>0))o.err.push("Falta unid.");if(!(parseInt(r.c,10)>0))o.err.push("Falta cant.");
+  if(o.ped>0&&o.total>0){var fin=prev+o.total;if(fin>o.ped)o.warn.push("Excede pedido en "+(fin-o.ped));else if(fin===o.ped)o.cierra=true;else o.falta=o.ped-fin}
+  if(dup)o.warn.push("Repetida en la tabla");
+  var rec=registros.find(function(x){return x.op.toLowerCase()===op.toLowerCase()&&(x.fdesp||"")===fd&&x.u===(parseInt(r.u,10)||0)&&x.c===(parseInt(r.c,10)||0)&&x.total>0&&(Date.now()-new Date(x.creado).getTime())<15*60000});
+  if(rec)o.warn.push("Igual a un registro de hace poco");
+  return o}
+function gCelda(i,f){return document.querySelector('#gBody [data-r="'+i+'"][data-f="'+f+'"]')}
+function gModSel(i){var r=grid[i],m=buscar(r.op),td=document.querySelector('#gBody tr[data-i="'+i+'"] td.mod');if(!td)return;
+  if(!m||(m.modelos||[]).length<2){td.innerHTML='<span style="color:var(--muted);font-size:.72rem">—</span>';if(r.mod!=="all")r.mod="all";return}
+  var h='<select data-r="'+i+'" data-f="mod"><option value="all">Todos juntos</option>';m.modelos.forEach(function(mo,k){h+='<option value="'+k+'">'+esc(mo.modelo||mo.descripcion)+'</option>'});td.innerHTML=h+'</select>';
+  td.firstChild.value=r.mod;if(td.firstChild.value!==r.mod){r.mod="all";td.firstChild.value="all"}}
+function gRender(){gDl();var b=$("gBody");b.innerHTML="";grid.forEach(function(r,i){var tr=document.createElement("tr");tr.dataset.i=i;
+  tr.innerHTML='<td class="idx">'+(i+1)+'</td><td><input data-r="'+i+'" data-f="op" class="mono" list="dlOps" autocomplete="off" style="width:130px" value="'+esc(r.op)+'"/></td><td class="mod"></td>'+
+  '<td class="ro cli"></td><td class="ro mono sap"></td><td class="ro desc"></td>'+
+  '<td><input data-r="'+i+'" data-f="pedido" class="n mono" type="number" min="0" inputmode="numeric"/></td><td class="num prev"></td>'+
+  '<td><select data-r="'+i+'" data-f="emp"><option value="caja">Caja</option><option value="paquete">Paquete</option></select></td>'+
+  '<td><input data-r="'+i+'" data-f="u" class="n mono" type="number" min="0" inputmode="numeric" value="'+esc(r.u)+'"/></td>'+
+  '<td><input data-r="'+i+'" data-f="c" class="n mono" type="number" min="0" inputmode="numeric" value="'+esc(r.c)+'"/></td>'+
+  '<td class="num tot"></td><td class="msg"></td><td><button class="x" data-del="'+i+'" title="Quitar fila">✕</button></td>';
+  b.appendChild(tr);tr.querySelector('[data-f="emp"]').value=r.emp||"caja";gModSel(i)});gActualizar()}
+function gActualizar(){var listas=0,conErr=0,uds=0;grid.forEach(function(r,i){var tr=document.querySelector('#gBody tr[data-i="'+i+'"]');if(!tr)return;var o=gInfo(i);
+  var q=function(s){return tr.querySelector(s)};
+  if(o.vacia){tr.className="";["cli","sap","desc","prev","tot","msg"].forEach(function(c){q("td."+c).textContent=""});q('[data-f="pedido"]').value=r.pedido;q('[data-f="pedido"]').placeholder="";return}
+  q("td.cli").textContent=o.m?o.m.cliente||"":"";q("td.sap").textContent=o.mo?o.mo.sap:"";q("td.desc").textContent=o.mo?o.mo.desc:"";q("td.desc").title=o.mo?o.mo.desc:"";
+  var pi=q('[data-f="pedido"]');if(document.activeElement!==pi){pi.value=r.pedido;pi.placeholder=o.ped?String(o.ped):"0"}
+  q("td.prev").textContent=o.prev;q("td.tot").textContent=o.total;
+  var msg=o.err.length?o.err.join(" · "):o.warn.length?o.warn.join(" · "):(o.cierra?"Listo · completa la OP":"Listo"+(o.falta?" · faltan "+o.falta:""));
+  if(!o.err.length&&o.warn.length&&o.falta)msg+=" · faltan "+o.falta;
+  q("td.msg").textContent=msg;tr.className=o.err.length?"err":o.warn.length?"warn":"ok";
+  if(o.err.length)conErr++;else{listas++;uds+=o.total}});
+  $("gResumen").innerHTML="Filas listas: <b>"+listas+"</b> · Con errores: <b>"+conErr+"</b> · Unidades a guardar: <b>"+uds+"</b>";
+  $("gGuardar").textContent=listas?"Guardar "+listas+" fila(s) lista(s)":"Guardar filas listas";$("gGuardar").disabled=!listas||gGuardando;$("gGuardar").style.opacity=listas?1:.5}
+function gAsegurarUltima(){if(!gVacia(grid[grid.length-1]||{op:"x"}))return;}
+function gFoco(i,f){var e=gCelda(i,f)||gCelda(i,"op");if(e){e.focus();if(e.select&&e.type!=="select-one")try{e.select()}catch(x){}}}
+var G_ORDEN=["op","mod","pedido","emp","u","c"];
+function gSiguiente(i,f){var k=G_ORDEN.indexOf(f);for(var n=k+1;n<G_ORDEN.length;n++){if(gCelda(i,G_ORDEN[n])){gFoco(i,G_ORDEN[n]);return}}
+  if(i===grid.length-1){grid.push(gNueva());gRender()}gFoco(i+1,"op")}
+$("gBody").addEventListener("input",function(e){var t=e.target,i=+t.dataset.r,f=t.dataset.f;if(isNaN(i)||!f)return;grid[i][f]=t.value;
+  if(f==="op"){var m=buscar(t.value);if(m&&m.op!==t.value){t.value=m.op;grid[i].op=m.op}grid[i].pedido="";grid[i].mod="all";gModSel(i)}
+  if(i===grid.length-1&&!gVacia(grid[i])){grid.push(gNueva());var keep=[i,f];gRender();gFoco(keep[0],keep[1]);var el=gCelda(keep[0],keep[1]);if(el&&el.setSelectionRange&&el.type==="text")el.setSelectionRange(el.value.length,el.value.length)}
+  gActualizar();gBorrador()});
+$("gBody").addEventListener("change",function(e){var t=e.target;if(t.tagName==="SELECT"){grid[+t.dataset.r][t.dataset.f]=t.value;gActualizar();gBorrador()}});
+$("gBody").addEventListener("keydown",function(e){var t=e.target,i=+t.dataset.r,f=t.dataset.f;if(isNaN(i)||!f)return;
+  if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();gGuardarTodo();return}
+  if(e.key==="Enter"){e.preventDefault();gSiguiente(i,f);return}
+  if(t.tagName!=="SELECT"&&(e.key==="ArrowDown"||e.key==="ArrowUp")){if(f==="op"&&t.list&&t.value&&e.key==="ArrowDown"&&!buscar(t.value))return;e.preventDefault();var n=i+(e.key==="ArrowDown"?1:-1);if(n<0)return;if(n>=grid.length){grid.push(gNueva());gRender()}gFoco(n,f)}});
+$("gBody").addEventListener("paste",function(e){var t=e.target;if(t.dataset.f!=="op")return;var tx=(e.clipboardData||window.clipboardData).getData("text");if(!/[\t\n]/.test(tx))return;e.preventDefault();
+  var i=+t.dataset.r,ls=tx.replace(/\r/g,"").split("\n").filter(function(l){return l.trim()});ls.forEach(function(l,k){var c=l.split("\t");var r=grid[i+k];if(!r){r=gNueva();grid.push(r)}var m=buscar(c[0]);r.op=m?m.op:String(c[0]||"").trim();r.pedido="";r.mod="all";if(c[1]!=null&&c[1]!=="")r.u=String(parseInt(c[1],10)||"");if(c[2]!=null&&c[2]!=="")r.c=String(parseInt(c[2],10)||"")});
+  if(!gVacia(grid[grid.length-1]))grid.push(gNueva());gRender();gBorrador();toast("ok",ls.length+" fila(s) pegadas")});
+$("gBody").addEventListener("click",function(e){var b=e.target.closest("[data-del]");if(!b)return;var i=+b.dataset.del;if(!gVacia(grid[i])&&!confirm("¿Quitar la fila "+(i+1)+"?"))return;grid.splice(i,1);if(!grid.length||!gVacia(grid[grid.length-1]))grid.push(gNueva());gRender();gBorrador()});
+$("gAdd").addEventListener("click",function(){if(!gVacia(grid[grid.length-1]||{op:"x"})){grid.push(gNueva());gRender()}gFoco(grid.length-1,"op")});
+$("gLimpiar").addEventListener("click",function(){if(grid.some(function(r){return !gVacia(r)})&&!confirm("¿Vaciar toda la tabla?"))return;grid=[gNueva()];gRender();gBorrador()});
+$("gTraer").addEventListener("click",function(){var fd=fdActual();if(!fd){toast("error","Primero elige la fecha de despacho");return}var vistos={},ops=[];
+  grid.forEach(function(r){if(r.op)vistos[r.op.toLowerCase()]=1});
+  var add=function(op){var k=String(op||"").trim().toLowerCase();if(!k||vistos[k])return;vistos[k]=1;var p=pedidoDe(op,fd);if(p&&acumulado(op,fd)>=p)return;ops.push(String(op).trim())};
+  if(planesOp[fd])planesOp[fd].items.forEach(function(x){add(x.op)});
+  registros.slice().reverse().forEach(function(x){if((x.fdesp||"")===fd)add(x.op)});
+  if(!ops.length){toast("error","No hay OPs pendientes para el "+fcorta(fd));return}
+  grid=grid.filter(function(r){return !gVacia(r)});ops.forEach(function(op){var m=buscar(op);grid.push(gNueva(m?m.op:op))});grid.push(gNueva());gRender();gBorrador();toast("ok",ops.length+" OP(s) pendientes agregadas")});
+function gGuardarTodo(){if(gGuardando)return;
+  if(!$("fdesp").value){toast("error","Pon la fecha de despacho");$("fdesp").focus();return}
+  if(!$("fecha").value){toast("error","Pon la fecha de registro");$("fecha").focus();return}
+  if(!$("nombre").value){toast("error","Selecciona el habilitador");$("nombre").focus();return}
+  var fd=fdActual(),ok=[],avisos=[],errs=0;grid.forEach(function(r,i){var o=gInfo(i);if(o.vacia)return;if(o.err.length){errs++;return}ok.push({i:i,r:r,o:o});if(o.warn.length)avisos.push("Fila "+(i+1)+" ("+r.op+"): "+o.warn.join(", "))});
+  if(!ok.length){toast("error","Ninguna fila está lista. Revisa las marcadas en rojo");return}
+  if(avisos.length&&!confirm("Revisa antes de guardar:\n\n"+avisos.join("\n")+"\n\n¿Guardar de todas formas?"))return;
+  if(!confirm("Se guardarán "+ok.length+" registro(s) para el despacho del "+fcorta(fd)+(errs?"\n("+errs+" fila(s) con errores quedan en la tabla)":"")+".\n¿Confirmar?"))return;
+  gGuardando=true;var nuevos=[],envio=[],ops={};
+  ok.forEach(function(x){var r=x.r,o=x.o,op=o.m?o.m.op:r.op.trim();
+    var n={id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:fd,turno:turno,nombre:$("nombre").value,op:op,sap:o.mo?o.mo.sap:"",descripcion:o.mo?o.mo.desc:"",cliente:o.m?o.m.cliente||"":"",
+      pedido:o.ped,empaque:r.emp||"caja",u:parseInt(r.u,10)||0,c:parseInt(r.c,10)||0,estado:"",creado:new Date().toISOString(),sync:false};n.total=n.u*n.c;nuevos.push(n);ops[op]=n.pedido});
+  Object.keys(ops).forEach(function(op){registros.forEach(function(x){if(x.op.toLowerCase()===op.toLowerCase()&&(x.fdesp||"")===fd&&x.pedido!==ops[op]){x.pedido=ops[op];x.sync=false;envio.push(x)}})});
+  registros=nuevos.slice().reverse().concat(registros);envio=nuevos.concat(envio.filter(function(x){return nuevos.indexOf(x)<0}));
+  Object.keys(ops).forEach(function(op){recalcularEstados(op,fd).forEach(function(x){if(envio.indexOf(x)<0)envio.push(x)})});
+  sv(K_REG,registros);var idx=ok.map(function(x){return x.i});grid=grid.filter(function(r,i){return idx.indexOf(i)<0&&!gVacia(r)});grid.push(gNueva());
+  gGuardando=false;gRender();gBorrador();renderLista();enviar(envio);toast("ok",nuevos.length+" registro(s) guardados"+(errs?" · "+errs+" con errores pendientes":""));gFoco(grid.length-1,"op")}
+$("gGuardar").addEventListener("click",gGuardarTodo);
+function gModo(v){sv("ctrl_modo_reg",v);$("gridPanel").classList.toggle("hidden",v!=="tabla");$("regForm").classList.toggle("hidden",v==="tabla");
+  document.querySelectorAll("#modoReg .chip").forEach(function(c){c.classList.toggle("active",c.dataset.v===v)})}
+grupo("modoReg",gModo);gModo(ld("ctrl_modo_reg","tabla"));
+$("fdesp").addEventListener("change",gCargar);
+(function(){var _rl=renderLista;renderLista=function(){_rl.apply(this,arguments);gDl();gActualizar()}})();
+gCargar();
 })();
 </script>
 </body>
