@@ -221,8 +221,8 @@ input[type=date]{-webkit-appearance:none;appearance:none}
   <div class="despRow">
     <div class="field"><label for="fdesp">Fecha de despacho</label><input type="date" id="fdesp"/></div>
     <div class="tools" id="cargaDespacho">
-      <button class="btn-s" id="planImp" type="button">Cargar lista de despacho (Excel SAP, CANT)</button>
-      <button class="btn-s" id="planOpImp" type="button">Cargar lista por OP (Excel OP, cantidad)</button>
+      <button class="btn-s" id="planImp" type="button">Cargar lista de despacho (Excel SAP, CANT, STOCK)</button>
+      <button class="btn-s" id="planOpImp" type="button">Cargar lista por OP (Excel OP, cantidad, stock)</button>
       <button class="btn-s hidden" id="planBorrar" type="button">Quitar lista</button>
       <button class="btn-s hidden" id="planOpBorrar" type="button">Quitar lista OP</button>
       <input type="file" id="planFile" accept=".xlsx,.xls,.csv" class="hidden"/>
@@ -455,6 +455,11 @@ function archivoOk(f){if(typeof XLSX==="undefined"){toast("error","No cargó la 
   if(f.size>15e6){toast("error","El archivo pesa más de 15 MB; revisa que sea el correcto");return false}return true}
 function avisoExport(n,total){if(n<total)toast("ok","Se exporta "+n+" de "+total+" por los filtros activos")}
 function esStock(r){return r&&r.empaque==="stock"}
+// Excel de carga: tercera columna opcional = stock inicial (por nombre "stock…" o, si no tiene nombre, la tercera columna)
+function colStock(r,usados,permitirBlanco){var i=r.findIndex(function(h){return h.indexOf("stock")>=0||h==="inicial"});if(i>=0)return i;
+  if(permitirBlanco&&r.length>2&&usados.indexOf(2)<0&&String(r[2]).trim()==="")return 2;return -1}
+function hayTercera(a){return a.some(function(r){return r.length>2&&String(r[2]).trim()!==""})?2:-1}
+function valStock(row,c){if(c<0)return 0;var t=String(row[c]==null?"":row[c]).replace(/,/g,"").trim();return t!==""&&isFinite(t)?parseFloat(t):0}
 function stockDe(op,fd){var q=(op||"").trim().toLowerCase(),t=0;registros.forEach(function(x){if(esStock(x)&&x.op.toLowerCase()===q&&(x.fdesp||"")===(fd||""))t+=x.total||0});return t}
 // Reporte completo: toda OP del despacho aparece aunque aún no tenga entregas; el stock inicial siempre se muestra
 function filasReporte(rs){var conEnt={},conStock={},zero={};
@@ -613,11 +618,11 @@ $("planBorrar").addEventListener("click",function(){var fd=$("fdesp").value;if(!
 $("planFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;if(!archivoOk(f))return;var fd=$("fdesp").value;
   var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
     var a=hojaSimple(wb);
-    var hi=-1,cs=-1,cc=-1;for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="sap"||h==="codigo sap"||h==="cod sap"}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;cs=x;cc=y}}
-    if(hi<0){if(a.length){cs=0;cc=1}else{toast("error","El Excel debe tener columnas SAP y CANT");return}}
-    var mp={},orden=[];for(var k=hi+1;k<a.length;k++){var sp=String(a[k][cs]).trim(),qs=String(a[k][cc]).replace(/,/g,"").trim();if(!sp||qs===""||!isFinite(qs))continue;var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp)){mp[key]={sap:sp,cant:0};orden.push(key)}mp[key].cant+=q}
+    var hi=-1,cs=-1,cc=-1,cst=-1;for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="sap"||h==="codigo sap"||h==="cod sap"}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;cs=x;cc=y;cst=colStock(r,[x,y],true)}}
+    if(hi<0){if(a.length){cs=0;cc=1;cst=hayTercera(a)}else{toast("error","El Excel debe tener columnas SAP y CANT");return}}
+    var mp={},orden=[];for(var k=hi+1;k<a.length;k++){var sp=String(a[k][cs]).trim(),qs=String(a[k][cc]).replace(/,/g,"").trim();if(!sp||qs===""||!isFinite(qs))continue;var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp)){mp[key]={sap:sp,cant:0,stock:0};orden.push(key)}mp[key].cant+=q;mp[key].stock+=valStock(a[k],cst)}
     if(!orden.length){toast("error","No hay filas con SAP");return}
-     confirmarLista(fd,orden.map(function(k){var it=mp[k],o=opsDeSap(it.sap);var cs=o.length?o.map(function(x){var mo=x.m.modelos[x.i];return {op:x.m.op,cliente:x.m.cliente||"",sap:mo.sap||it.sap,desc:mo.descripcion||""}}):[{op:"",cliente:"",sap:it.sap,desc:buscarSap(it.sap)}];return {cands:cs,cant:it.cant,ok:!!o.length,key:it.sap}}),"SAP")}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
+     confirmarLista(fd,orden.map(function(k){var it=mp[k],o=opsDeSap(it.sap);var cs=o.length?o.map(function(x){var mo=x.m.modelos[x.i];return {op:x.m.op,cliente:x.m.cliente||"",sap:mo.sap||it.sap,desc:mo.descripcion||""}}):[{op:"",cliente:"",sap:it.sap,desc:buscarSap(it.sap)}];return {cands:cs,cant:it.cant,stock:it.stock,ok:!!o.length,key:it.sap}}),"SAP")}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
 var K_PLANOP="ctrl_plan_op",planesOp=ld(K_PLANOP,{});
 function renderPlanOp(){var fd=$("fdesp").value,c=$("planOpRes");c.innerHTML="";var p=planesOp[fd];
   $("planOpBorrar").classList.toggle("hidden",!p);if(!p||!p.items.length)return;
@@ -648,13 +653,13 @@ function leerListaOp(wb,fd){
   function ncols(a){var m=0;a.forEach(function(r){var c=0;r.forEach(function(v){if(String(v).trim()!=="")c++});if(c>m)m=c});return m}
   var hojas=wb.SheetNames.map(function(n){var a=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:""});return {a:a,c:ncols(a)}}).filter(function(h){return h.a.length});
   hojas.sort(function(x,y){return (x.c<=3?0:1)-(y.c<=3?0:1)});
-  for(var s=0;s<hojas.length;s++){var a=hojas[s].a,c=hojas[s].c,hi=-1,co=-1,cc=-1,cf=-1;
-    for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="op"||h==="orden"||h==="orden de produccion"||h==="o.p."}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;co=x;cc=y;cf=r.findIndex(function(h){return h.indexOf("fecha")===0})}}
-    if(hi<0){if(c>3)continue;co=0;cc=1}
+  for(var s=0;s<hojas.length;s++){var a=hojas[s].a,c=hojas[s].c,hi=-1,co=-1,cc=-1,cf=-1,cst=-1;
+    for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="op"||h==="orden"||h==="orden de produccion"||h==="o.p."}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;co=x;cc=y;cf=r.findIndex(function(h){return h.indexOf("fecha")===0});cst=colStock(r,[x,y,cf],c<=3)}}
+    if(hi<0){if(c>3)continue;co=0;cc=1;cst=hayTercera(a)}
     if(c>3&&cf<0)continue;
     var mp={},orden=[];for(var k=hi+1;k<a.length;k++){var sp=String(a[k][co]).trim();if(!sp||!num(a[k][cc]))continue;
       if(c>3){var fv=a[k][cf],iso="";if(typeof fv==="number"){var d=XLSX.SSF.parse_date_code(fv);if(d)iso=d.y+"-"+String(d.m).padStart(2,"0")+"-"+String(d.d).padStart(2,"0")}else iso=String(fv).slice(0,10);if(iso!==fd)continue}
-      var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp)){mp[key]={op:sp,cant:0};orden.push(key)}mp[key].cant+=q}
+      var q=parseFloat(String(a[k][cc]).replace(/,/g,""))||0;var key=sp.toUpperCase();if(!(key in mp)){mp[key]={op:sp,cant:0,stock:0};orden.push(key)}mp[key].cant+=q;mp[key].stock+=valStock(a[k],cst)}
     if(orden.length)return orden.map(function(k){return mp[k]})}
   return null}
 $("planOpBorrar").addEventListener("click",function(){var fd=$("fdesp").value;if(!confirm("\u00bfQuitar la lista por OP del "+fcorta(fd)+"?"))return;delete planesOp[fd];sv(K_PLANOP,planesOp);renderPlanOp()});
@@ -662,15 +667,15 @@ $("planOpFile").addEventListener("change",function(e){var f=e.target.files[0];e.
   var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
      var orden=leerListaOp(wb,fd);if(orden===null){toast("error","No encontré una lista con OP y cantidad");return}
     if(!orden.length){toast("error","No hay filas con OP");return}
-     confirmarLista(fd,orden.map(function(it){var m=buscar(it.op);var cs=m&&m.modelos.length?m.modelos.map(function(mo){return {op:m.op,cliente:m.cliente||"",sap:mo.sap||"",desc:mo.descripcion||""}}):[{op:it.op,cliente:"",sap:"",desc:""}];return {cands:cs,cant:it.cant,ok:!!m,key:it.op}}),"OP")}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
+     confirmarLista(fd,orden.map(function(it){var m=buscar(it.op);var cs=m&&m.modelos.length?m.modelos.map(function(mo){return {op:m.op,cliente:m.cliente||"",sap:mo.sap||"",desc:mo.descripcion||""}}):[{op:it.op,cliente:"",sap:"",desc:""}];return {cands:cs,cant:it.cant,stock:it.stock,ok:!!m,key:it.op}}),"OP")}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
 var listaConf=null;
 function elegidos(r,v){if(v==="sep")return r.cands.slice();if(v==="all"&&r.cands.length>1){var a=r.cands;return [{op:a[0].op,cliente:a[0].cliente,sap:a.map(function(x){return x.sap}).filter(Boolean).join(" + "),desc:a.map(function(x){return x.desc}).join(" + ")}]}return [r.cands[+v||0]]}
 function confirmarLista(fd,rows,tipo){listaConf={fd:fd,rows:rows};var w=$("confLista");if(!w){w=document.createElement("div");w.id="confLista";w.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;display:flex;align-items:center;justify-content:center;padding:12px";document.body.appendChild(w)}
   var td="padding:6px;border-bottom:1px solid var(--line,#333);vertical-align:top;font-size:.78rem";
   var h=rows.map(function(r,i){var c=elegidos(r,tipo==="OP"?"all":"0")[0];var opCell=r.cands.length>1&&tipo==="SAP"?"<select data-cs='"+i+"'>"+r.cands.map(function(x,j){return "<option value='"+j+"'>"+esc(x.op)+"</option>"}).join("")+"</select>":"<span class='mono'>"+esc(c.op||"—")+"</span>";
     var sapCell=r.cands.length>1&&tipo==="OP"?"<select data-cs='"+i+"'><option value='all'>Todos juntos ("+r.cands.length+")</option><option value='sep'>Separados ("+r.cands.length+" tarjetas)</option>"+r.cands.map(function(x,j){return "<option value='"+j+"'>Solo "+esc(x.sap||x.desc)+"</option>"}).join("")+"</select>":"<span class='mono'>"+esc(c.sap||"—")+"</span>";
-    return "<tr"+(r.ok?"":" style='opacity:.7'")+"><td style='"+td+"'><input type='checkbox' data-ck='"+i+"'"+(r.ok?" checked":"")+"></td><td style='"+td+"'>"+opCell+"</td><td style='"+td+"'>"+sapCell+"</td><td style='"+td+"' data-cl='"+i+"'>"+esc(c.cliente)+"</td><td style='"+td+"' data-de='"+i+"'>"+(r.ok?esc(c.desc):"<span style='color:var(--red)'>"+esc(r.key)+" no está en Sheets</span>")+"</td><td style='"+td+"'><input type='number' data-q='"+i+"' value='"+r.cant+"' style='width:120px'></td><td style='"+td+"'><input type='number' data-s='"+i+"' min='0' placeholder='0' style='width:120px'></td></tr>"}).join("");
-  w.innerHTML="<div class='card' style='max-width:900px;width:100%;max-height:90vh;overflow:auto'><div class='sec'>Confirmar despacho "+fcorta(fd)+" · "+rows.length+" fila(s)</div><div style='font-size:.72rem;color:var(--muted);margin-bottom:6px'>Al aceptar se crean las tarjetas con la cantidad pedida y se envían a Sheets. Stock inicial = lo que almacén ya tiene de esa OP: cuenta como cubierto y solo se completa la diferencia. Luego registras las entregas como siempre.</div><table style='width:100%;border-collapse:collapse'><thead><tr><th></th><th style='text-align:left'>OP</th><th style='text-align:left'>SAP</th><th style='text-align:left'>CLIENTE</th><th style='text-align:left'>DESCRIPCIÓN</th><th style='text-align:left'>PEDIDO</th><th style='text-align:left'>STOCK INICIAL</th></tr></thead><tbody>"+h+"</tbody></table><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn-s' id='confNo'>Cancelar</button><button class='btn-s' id='confSi' style='background:var(--acc,#F2A93B);color:#12161F'>Aceptar y enviar</button></div></div>";
+    return "<tr"+(r.ok?"":" style='opacity:.7'")+"><td style='"+td+"'><input type='checkbox' data-ck='"+i+"'"+(r.ok?" checked":"")+"></td><td style='"+td+"'>"+opCell+"</td><td style='"+td+"'>"+sapCell+"</td><td style='"+td+"' data-cl='"+i+"'>"+esc(c.cliente)+"</td><td style='"+td+"' data-de='"+i+"'>"+(r.ok?esc(c.desc):"<span style='color:var(--red)'>"+esc(r.key)+" no está en Sheets</span>")+"</td><td style='"+td+"'><input type='number' data-q='"+i+"' value='"+r.cant+"' style='width:120px'></td><td style='"+td+"'><input type='number' data-s='"+i+"' min='0' placeholder='0' value='"+(r.stock>0?r.stock:"")+"' style='width:120px'></td></tr>"}).join("");
+  w.innerHTML="<div class='card' style='max-width:900px;width:100%;max-height:90vh;overflow:auto'><div class='sec'>Confirmar despacho "+fcorta(fd)+" · "+rows.length+" fila(s)</div><div style='font-size:.72rem;color:var(--muted);margin-bottom:6px'>Al aceptar se crean las tarjetas con la cantidad pedida y se envían a Sheets. Stock inicial = lo que almacén ya tiene de esa OP: cuenta como cubierto y solo se completa la diferencia. Si tu Excel trae una tercera columna con el stock, ya viene cargado aquí y puedes corregirlo. Luego registras las entregas como siempre.</div><table style='width:100%;border-collapse:collapse'><thead><tr><th></th><th style='text-align:left'>OP</th><th style='text-align:left'>SAP</th><th style='text-align:left'>CLIENTE</th><th style='text-align:left'>DESCRIPCIÓN</th><th style='text-align:left'>PEDIDO</th><th style='text-align:left'>STOCK INICIAL</th></tr></thead><tbody>"+h+"</tbody></table><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn-s' id='confNo'>Cancelar</button><button class='btn-s' id='confSi' style='background:var(--acc,#F2A93B);color:#12161F'>Aceptar y enviar</button></div></div>";
   w.style.display="flex";
   w.querySelectorAll("[data-cs]").forEach(function(sel){sel.addEventListener("change",function(){var i=+sel.dataset.cs,c=elegidos(rows[i],sel.value)[0];if(sel.value==="sep")c={cliente:rows[i].cands[0].cliente,desc:rows[i].cands.map(function(x){return x.desc}).join(" | ")};w.querySelector("[data-cl='"+i+"']").textContent=c.cliente;w.querySelector("[data-de='"+i+"']").textContent=c.desc})});
   $("confNo").onclick=function(){w.style.display="none";listaConf=null};
