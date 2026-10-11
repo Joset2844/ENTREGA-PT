@@ -164,7 +164,10 @@ input[type=date]{-webkit-appearance:none;appearance:none}
 .gt input,.gt select{min-height:40px;padding:6px 8px;font-size:14px;border-radius:8px}
 .gt select{min-width:96px}
 .gt input[data-f=op]{width:124px}
-.gt input.n{text-align:right;width:74px}
+.gt input.n{text-align:right;width:92px}
+.gt input[data-f=pedido]{width:120px}
+.gt input[type=number],#confLista input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.gt input[type=number]::-webkit-inner-spin-button,.gt input[type=number]::-webkit-outer-spin-button,#confLista input[type=number]::-webkit-inner-spin-button,#confLista input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 .gt td.num{text-align:right;font-family:'IBM Plex Mono',monospace;white-space:nowrap}
 .gt tr.err td{background:rgba(210,59,59,.09)}.gt tr.warn td{background:rgba(245,165,36,.14)}.gt tr.ok td{background:rgba(30,142,78,.07)}
 .gt tr.err td:first-child{box-shadow:inset 4px 0 0 var(--red)}.gt tr.warn td:first-child{box-shadow:inset 4px 0 0 var(--amber)}.gt tr.ok td:first-child{box-shadow:inset 4px 0 0 var(--green)}
@@ -178,8 +181,10 @@ input[type=date]{-webkit-appearance:none;appearance:none}
 .gpanel .resumen b{color:var(--text)}
 @media(min-width:760px){.gpanel>.btn{display:block;width:auto;min-width:300px;margin-left:auto}}
 #confLista .card{max-width:min(1200px,96vw)!important}
+#confLista th{font-size:.74rem;color:var(--muted);font-weight:700;padding:6px}
+#confLista input[type=checkbox]{width:20px;height:20px;min-height:0;accent-color:var(--amber)}
 
-@media(max-width:1299px){.gt{min-width:1180px}}
+@media(max-width:1299px){.gt{min-width:1280px}}
 </style>
 </head>
 <body>
@@ -236,7 +241,7 @@ input[type=date]{-webkit-appearance:none;appearance:none}
     <button class="btn-s" id="gTraer" type="button">Traer OPs pendientes del día</button>
     <button class="btn-s" id="gLimpiar" type="button">Vaciar tabla</button>
   </div>
-  <div class="gwrap"><table class="gt"><thead><tr><th>#</th><th>OP</th><th>Modelo</th><th>Cliente</th><th>SAP</th><th>Descripción</th><th class="n">Pedido</th><th class="n">Ya entreg.</th><th>Empaque</th><th class="n">Unid. x emp.</th><th class="n">Cant.</th><th class="n">Total</th><th>Estado</th><th></th></tr></thead><tbody id="gBody"></tbody></table></div>
+  <div class="gwrap"><table class="gt"><thead><tr><th>#</th><th>OP</th><th>Modelo</th><th>Cliente</th><th>SAP</th><th>Descripción</th><th class="n">Pedido</th><th class="n" title="Ya entregado más el stock inicial registrado">Entreg. + stock</th><th>Empaque</th><th class="n">Unid. x emp.</th><th class="n">Cant.</th><th class="n">Total</th><th>Estado</th><th></th></tr></thead><tbody id="gBody"></tbody></table></div>
   <datalist id="dlOps"></datalist>
   <button class="btn" id="gGuardar" type="button">Guardar filas listas</button>
   <div class="ayuda">Enter o Tab: siguiente celda · Enter en la última celda: nueva fila · Flechas ↑ ↓: cambiar de fila · Ctrl+Enter: guardar · Puedes pegar desde Excel columnas OP, Unid., Cant. en la celda OP. La tabla se guarda sola como borrador por fecha de despacho.</div>
@@ -374,6 +379,16 @@ input[type=date]{-webkit-appearance:none;appearance:none}
     </div>
     <p class="info" style="margin:0;font-size:.78rem">Hoja principal: OP, Descripción, Cliente, SAP. Hoja de modelos: OP, Modelo, Cantidad, Código SAP. Doble toque en "Actualizar" cambia los links.</p>
   </div>
+  <div class="panel">
+    <div class="sec">Respaldo de datos</div>
+    <p class="info" style="margin:0 0 10px">Descarga una copia de tus registros e ingresos. Al restaurar solo se agregan los que no existen; nunca se borra ni se pisa nada.</p>
+    <div class="tools">
+      <button class="btn-s" id="resBaj" type="button">Descargar respaldo</button>
+      <button class="btn-s" id="resSub" type="button">Restaurar respaldo</button>
+      <input type="file" id="resFile" accept=".json,application/json" class="hidden"/>
+    </div>
+    <div id="resInfo" class="info"></div>
+  </div>
 </div>
 
 </main>
@@ -388,13 +403,65 @@ var DEFAULT_URL="https://docs.google.com/spreadsheets/d/e/2PACX-1vTVxCxG3XBMgSSe
 var catalogo=[],nombres=[],registros=[];
 var turno="Día",estado="",emp="caja";
 
-function ld(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
-function sv(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){toast("error","No se pudo guardar")}}
+function ld(k,d){var v=null;try{v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){try{if(v){localStorage.setItem(k+"_corrupto",v);toast("error","Datos dañados en "+k+": se guardó una copia y se empieza vacío")}}catch(x){}return d}}
+function sv(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){toast("error","No se pudo guardar: la memoria del navegador está llena. Descarga un respaldo en Config")}}
 function toast(t,x){var e=document.createElement("div");e.className="toast "+t;e.textContent=x;$("toasts").appendChild(e);setTimeout(function(){e.remove()},2600)}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
 function norm(h){return String(h||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")}
 function hoy(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
 function fcorta(f){var p=String(f).split("-");return p.length===3?p[2]+"/"+p[1]+"/"+p[0]:f}
+// ===== Seguridad de datos: límites y validaciones =====
+var LIM={fechaFut:3,fechaPas:30,unid:20000,cant:2000,total:100000,pedido:500000};
+try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
+function esEntero(v){return /^\d+$/.test(String(v==null?"":v).trim())}
+function difDias(f){var a=new Date(f+"T00:00:00"),b=new Date(hoy()+"T00:00:00");return Math.round((a-b)/864e5)}
+function avisoFecha(f,nom){if(!/^\d{4}-\d{2}-\d{2}$/.test(f||""))return "La fecha de "+nom+" no es válida";var d=difDias(f);
+  if(d>LIM.fechaFut)return "La fecha de "+nom+" ("+fcorta(f)+") está "+d+" días en el futuro";
+  if(d<-LIM.fechaPas)return "La fecha de "+nom+" ("+fcorta(f)+") es de hace "+(-d)+" días";return ""}
+function avisoCant(u,c){var w=[];if(u>LIM.unid)w.push("Unidades por empaque muy alta ("+u+")");if(c>LIM.cant)w.push("Cantidad de empaques muy alta ("+c+")");if(u*c>LIM.total)w.push("Total muy alto ("+(u*c)+" u)");return w}
+function confirmarAvisos(w){w=w.filter(Boolean);if(!w.length)return true;return confirm("Revisa antes de guardar:\n\n• "+w.join("\n• ")+"\n\n¿Guardar de todas formas?")}
+var _lk=0;function bloqueado(){var n=Date.now();if(n-_lk<1200){toast("error","Ya se está guardando, espera un momento");return true}_lk=n;return false}
+function avisosRegistro(x){var w=[],u=parseInt(x.u,10)||0,c=parseInt(x.c,10)||0,t=u*c,op=x.op;
+  w.push(avisoFecha(x.fecha,"registro"),avisoFecha(x.fdesp,"despacho"));avisoCant(u,c).forEach(function(a){w.push(a)});
+  if(!buscar(op))w.push("La OP "+op+" no está en el catálogo de Sheets"+(!x.desc&&!x.cliente?" y se guardará sin descripción ni cliente":""));
+  else{if(!x.desc)w.push("La descripción está vacía");if(!x.cliente)w.push("El cliente está vacío")}
+  var ped=parseInt(x.pedido,10)||0;if(ped>LIM.pedido)w.push("Pedido muy alto ("+ped+")");
+  if(ped>0){var ac=acumulado(op,x.fdesp);if(ac+t>ped)w.push("Se excede el pedido en "+(ac+t-ped)+" u (pedido "+ped+", entregado + stock "+ac+")");
+    var prev=ultimoPedido(op,x.fdesp);if(prev>0&&prev!==ped)w.push("El pedido de "+op+" cambia de "+prev+" a "+ped+" en todas sus entradas de ese despacho")}
+  if(registros.some(function(r){return String(r.op).toLowerCase()===op.toLowerCase()&&(r.fdesp||"")===x.fdesp&&r.u===u&&r.c===c&&r.total>0&&Date.now()-new Date(r.creado).getTime()<9e5}))w.push("Igual a una entrada guardada hace menos de 15 min");
+  return w}
+function avisosIngreso(x){var w=[],u=parseInt(x.u,10)||0,c=parseInt(x.c,10)||0,op=x.op;
+  w.push(avisoFecha(x.fecha,"ingreso"));avisoCant(u,c).forEach(function(a){w.push(a)});
+  if(!buscar(op))w.push("La OP "+op+" no está en el catálogo de Sheets"+(!x.desc&&!x.cliente?" y se guardará sin descripción ni cliente":""));
+  else{if(!x.desc)w.push("La descripción está vacía");if(!x.cliente)w.push("El cliente está vacío")}
+  if(ingresos.some(function(r){return String(r.op).toLowerCase()===op.toLowerCase()&&r.fecha===x.fecha&&r.u===u&&r.c===c&&r.total>0&&Date.now()-new Date(r.creado).getTime()<9e5}))w.push("Igual a un ingreso guardado hace menos de 15 min");
+  return w}
+// ===== Sincronización: registros válidos, borrados pendientes, protección contra vaciado =====
+function validoRec(r){return !!r&&String(r.id||"").trim()!==""&&String(r.op||"").trim()!==""&&/^\d{4}-\d{2}-\d{2}$/.test(String(r.fecha||""))&&Number.isInteger(r.u)&&Number.isInteger(r.c)&&Number.isInteger(r.total)&&r.u>=0&&r.c>=0&&r.total>=0}
+function soloValidos(rs,msg){var ok=rs.filter(validoRec),mal=rs.length-ok.length;if(mal&&msg)toast("error",mal+" registro(s) con datos incompletos no se enviaron a Sheets");return ok}
+function recRemotoOk(x,pend,tabla){if(!x||String(x.id==null?"":x.id).trim()===""||String(x.op==null?"":x.op).trim()==="")return false;var id=String(x.id).trim();return !pend.some(function(p){return p.id===id&&p.tabla===tabla})}
+var _ap=0;function avisoPurga(f,t){if(Date.now()-_ap>60000){_ap=Date.now();toast("error","Sheets no trae "+f+" de "+t+" registros ya enviados; no se borró nada local. Revisa la hoja.")}}
+var K_DEL="ctrl_borrados";
+function colaDel(){var a=ld(K_DEL,[]);return Array.isArray(a)?a:[]}
+function encolarDel(id,tabla){var a=colaDel();if(!a.some(function(x){return x.id===id&&x.tabla===tabla}))a.push({id:id,tabla:tabla});sv(K_DEL,a);procesarDel()}
+function procesarDel(){var a=colaDel();if(!a.length||!navigator.onLine||!cfgSb().url)return Promise.resolve();
+  return a.reduce(function(p,x){return p.then(function(){var pl={action:"delete",id:x.id};if(x.tabla==="ingresos")pl.tabla="ingresos";
+    return llamar(pl).then(function(){sv(K_DEL,colaDel().filter(function(y){return !(y.id===x.id&&y.tabla===x.tabla)}))}).catch(function(){})})},Promise.resolve())}
+function pendTxt(){var np=pendientes().length+pendIng().length+colaDel().length;return np?" · "+np+" sin enviar":""}
+// ===== Carga y descarga de archivos =====
+function archivoOk(f){if(typeof XLSX==="undefined"){toast("error","No cargó la librería de Excel (¿sin internet?). Reintenta con conexión");return false}
+  if(!/\.(xlsx|xls|csv)$/i.test(f.name)){toast("error","El archivo debe ser .xlsx, .xls o .csv");return false}
+  if(f.size===0){toast("error","El archivo está vacío");return false}
+  if(f.size>15e6){toast("error","El archivo pesa más de 15 MB; revisa que sea el correcto");return false}return true}
+function avisoExport(n,total){if(n<total)toast("ok","Se exporta "+n+" de "+total+" por los filtros activos")}
+function esStock(r){return r&&r.empaque==="stock"}
+function stockDe(op,fd){var q=(op||"").trim().toLowerCase(),t=0;registros.forEach(function(x){if(esStock(x)&&x.op.toLowerCase()===q&&(x.fdesp||"")===(fd||""))t+=x.total||0});return t}
+// Reporte completo: toda OP del despacho aparece aunque aún no tenga entregas; el stock inicial siempre se muestra
+function filasReporte(rs){var conEnt={},conStock={},zero={};
+  rs.forEach(function(r){var k=r.op.toLowerCase()+"|"+(r.fdesp||"");if(esStock(r))conStock[k]=1;else if((r.total||0)>0)conEnt[k]=1});
+  return rs.filter(function(r){if(esStock(r)||(r.total||0)>0)return true;var k=r.op.toLowerCase()+"|"+(r.fdesp||"");
+    if(conEnt[k]||conStock[k])return false;var kz=k+"|"+(r.sap||"");if(zero[kz])return false;zero[kz]=1;return true})}
+
 
 // ---- pestañas
 document.querySelectorAll("#tabs .tab").forEach(function(b){b.addEventListener("click",function(){
@@ -459,6 +526,9 @@ $("guardar").addEventListener("click",function(){
   var mAct=buscar($("op").value);if(mAct&&mAct.modelos.length>1&&modeloSel===-1){toast("error","Elige el modelo de la OP");return}
   if(!(parseInt($("q-p").value,10)>0)){toast("error","Ingresa la cantidad pedida de la OP");return}
   if(!(calc()>0)){toast("error","Ingresa unidades y cantidad entregada");return}
+  if(!esEntero($("q-p").value)||!esEntero($("q-u").value)||!esEntero($("q-c").value)){toast("error","Pedido, unidades y cantidad deben ser números enteros (sin decimales ni negativos)");return}
+  if(!confirmarAvisos(avisosRegistro({fecha:$("fecha").value,fdesp:$("fdesp").value,op:$("op").value.trim(),desc:$("desc").value.trim(),cliente:$("cliente").value.trim(),pedido:$("q-p").value,u:$("q-u").value,c:$("q-c").value})))return;
+  if(bloqueado())return;
   var r={id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:$("fdesp").value,turno:turno,nombre:$("nombre").value,
     op:$("op").value.trim(),sap:$("sap").value.trim(),descripcion:$("desc").value.trim(),cliente:$("cliente").value.trim(),
     pedido:parseInt($("q-p").value,10)||0,empaque:emp,u:parseInt($("q-u").value,10)||0,c:parseInt($("q-c").value,10)||0,estado:"",creado:new Date().toISOString()};
@@ -494,32 +564,32 @@ function sincronizarPedido(){var op=$("op").value.trim().toLowerCase();if(op===o
 function pedidoSap(){var fd=fdActual(),op=$("op").value.trim();if(pedidoPlanOp(op,fd))return;var c=pedidoPlanSap($("sap").value,fd);if(c){$("q-p").value=c;actualizarOpAcum()}}
 function actualizarOpAcum(){var op=$("op").value.trim(),p=parseInt($("q-p").value,10)||0,el=$("opAcum");if(!op||!p){el.textContent="";return}
   var ac=acumulado(op,fdActual()),nu=(parseInt($("q-u").value,10)||0)*(parseInt($("q-c").value,10)||0),pe=p-ac-nu;
-  el.textContent="Despacho "+fcorta(fdActual())+" · Ya entregado: "+ac+" u"+(nu?" + esta entrada "+nu+" u":"")+" · "+(pe>=0?"Pendiente: "+pe+" u":"Excede en "+(-pe)+" u")}
+  el.textContent="Despacho "+fcorta(fdActual())+" · Ya entregado: "+(ac-stockDe(op,fdActual()))+" u"+(stockDe(op,fdActual())?" + stock inicial "+stockDe(op,fdActual())+" u":"")+(nu?" + esta entrada "+nu+" u":"")+" · "+(pe>=0?"Pendiente: "+pe+" u":"Excede en "+(-pe)+" u")}
 function agrupar(rs){var ops={},ordenO=[],saps={},ordenS=[];
   rs.forEach(function(r){var fd=r.fdesp||"",k=r.op.toLowerCase()+"|"+fd;
-    if(!ops[k]){ops[k]={op:r.op,fdesp:fd,cliente:r.cliente,pedido:0,ent:0,lineas:{}};ordenO.push(k)}
-    var o=ops[k];o.ent+=r.total||0;if(r.pedido)o.pedido=r.pedido;var pp=pedidoPlanOp(r.op,fd);if(pp)o.pedido=pp;
-    var sk=r.sap||("d:"+r.descripcion),L=o.lineas[sk]||(o.lineas[sk]={sap:r.sap||"",desc:r.descripcion,ent:0});L.ent+=r.total||0;
-    var gk=fd+"|"+sk,S=saps[gk]||(saps[gk]={fdesp:fd,sap:r.sap||"",desc:r.descripcion,ent:0,ops:{}});if(ordenS.indexOf(gk)===-1)ordenS.push(gk);
-    S.ent+=r.total||0;S.ops[r.op]=1});
+    if(!ops[k]){ops[k]={op:r.op,fdesp:fd,cliente:r.cliente,pedido:0,ent:0,stock:0,lineas:{}};ordenO.push(k)}
+    var o=ops[k],esS=esStock(r),tt=esS?0:(r.total||0);o.ent+=tt;if(esS)o.stock+=r.total||0;if(r.pedido)o.pedido=r.pedido;var pp=pedidoPlanOp(r.op,fd);if(pp)o.pedido=pp;
+    var sk=r.sap||("d:"+r.descripcion),L=o.lineas[sk]||(o.lineas[sk]={sap:r.sap||"",desc:r.descripcion,ent:0});L.ent+=tt;
+    var gk=fd+"|"+sk,S=saps[gk]||(saps[gk]={fdesp:fd,sap:r.sap||"",desc:r.descripcion,ent:0,stock:0,cli:{},ops:{}});if(ordenS.indexOf(gk)===-1)ordenS.push(gk);
+    S.ent+=tt;if(esS)S.stock+=r.total||0;if(r.cliente)S.cli[r.cliente]=1;S.ops[r.op]=1});
   function cmp(a,b,ka,kb){return a.fdesp<b.fdesp?1:a.fdesp>b.fdesp?-1:ka.localeCompare(kb,"es",{numeric:true})}
-  var lo=ordenO.map(function(k){var o=ops[k];o.acum=acumulado(o.op,o.fdesp);return o});
-  var ls=ordenS.map(function(k){return saps[k]});
+  var lo=ordenO.map(function(k){var o=ops[k];o.acum=acumulado(o.op,o.fdesp);var ds={};Object.keys(o.lineas).forEach(function(sk){var d=o.lineas[sk].desc;if(d)ds[d]=1});o.desc=Object.keys(ds).join(" + ");return o});
+  var ls=ordenS.map(function(k){var x=saps[k];x.cliente=Object.keys(x.cli).join(", ");return x});
   return{ops:lo,saps:ls}}
 function tarjetaOp(o){var d=document.createElement("div");d.className="card";
   var pd=o.pedido-o.acum,ok=o.pedido>0&&pd<=0;
   var badge=o.pedido>0?(ok?'<span class="badge b-COMPLETO">COMPLETO'+(pd<0?' (excede '+(-pd)+')':'')+'</span>':'<span class="badge b-INCOMPLETO">INCOMPLETO · faltan '+pd+'</span>'):'';
   var lin=Object.keys(o.lineas).map(function(k){var L=o.lineas[k];return '<div class="meta">· '+(L.sap?'SAP <span class="mono">'+esc(L.sap)+'</span> — ':'')+esc(L.desc)+': <strong>'+L.ent+' u</strong></div>'}).join("");
   d.innerHTML='<div class="top"><div><span class="op mono">'+esc(o.op)+'</span> <span style="font-size:.72rem;color:var(--muted)">'+esc(o.cliente)+'</span></div>'+badge+'</div>'
-    +'<div class="meta">Despacho: <strong>'+fcorta(o.fdesp)+'</strong> · Pedido: <strong>'+o.pedido+' u</strong></div>'
-    +'<div class="meta">Entregado en esta vista: <strong>'+o.ent+' u</strong> · Acumulado del despacho: <strong>'+o.acum+' u</strong> · Pendiente: <strong>'+Math.max(pd,0)+' u</strong>'+(pd<0&&o.pedido>0?' · Excedente: <strong style="color:var(--red)">'+(-pd)+' u</strong>':'')+'</div>'+lin;
+    +'<div class="meta">Despacho: <strong>'+fcorta(o.fdesp)+'</strong> · Pedido: <strong>'+o.pedido+' u</strong>'+(o.stock>0?' · Stock inicial: <strong>'+o.stock+' u</strong>':'')+'</div>'
+    +'<div class="meta">Entregado en esta vista: <strong>'+o.ent+' u</strong> · Acumulado del despacho'+(o.stock>0?' (con stock)':'')+': <strong>'+o.acum+' u</strong> · Pendiente: <strong>'+Math.max(pd,0)+' u</strong>'+(pd<0&&o.pedido>0?' · Excedente: <strong style="color:var(--red)">'+(-pd)+' u</strong>':'')+'</div>'+lin;
   return d}
 function tarjetaSap(x){var d=document.createElement("div");d.className="card";
-  d.innerHTML='<div class="top"><div><span class="op mono">SAP '+esc(x.sap||"—")+'</span></div><span class="badge">'+x.ent+' u</span></div><div style="font-size:.88rem;margin:4px 0 2px">'+esc(x.desc)+'</div><div class="meta">Despacho: <strong>'+fcorta(x.fdesp)+'</strong> · OP: '+esc(Object.keys(x.ops).join(", "))+'</div>';
+  d.innerHTML='<div class="top"><div><span class="op mono">SAP '+esc(x.sap||"—")+'</span></div><span class="badge">'+x.ent+' u</span></div><div style="font-size:.88rem;margin:4px 0 2px">'+esc(x.desc)+'</div><div class="meta">Despacho: <strong>'+fcorta(x.fdesp)+'</strong> · OP: '+esc(Object.keys(x.ops).join(", "))+(x.stock>0?' · Stock inicial: <strong>'+x.stock+' u</strong>':'')+'</div>';
   return d}
 function renderResumen(c,rs){
   if(!rs.length){c.innerHTML='<div class="empty">Sin registros.</div>';return}
-  var g=agrupar(rs);var tot=rs.reduce(function(a,r){return a+(r.total||0)},0);
+  var g=agrupar(rs);var tot=rs.reduce(function(a,r){return a+(esStock(r)?0:(r.total||0))},0);
   function t(txt){var h=document.createElement("div");h.className="sec";h.style.gridColumn="1/-1";h.textContent=txt;c.appendChild(h)}
   t("Por OP y despacho — "+g.ops.length+" · "+tot+" u entregadas");g.ops.forEach(function(o){c.appendChild(tarjetaOp(o))});
   t("Por SAP y despacho (suma de las OP del mismo despacho)");g.saps.forEach(function(x){c.appendChild(tarjetaSap(x))})}
@@ -540,7 +610,7 @@ function buscarSap(sap){var q=String(sap).trim().toUpperCase();for(var i=0;i<cat
 function hojaSimple(wb){var best=null;wb.SheetNames.forEach(function(n){var a=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:""});var m=0;a.forEach(function(r){var c=r.filter(function(v){return String(v).trim()!==""}).length;if(c>m)m=c});if(a.length&&(!best||(m<=3&&best.m>3)))best={a:a,m:m}});return best?best.a:[]}
 $("planImp").addEventListener("click",function(){if(!$("fdesp").value){toast("error","Primero elige la fecha de despacho");return}$("planFile").click()});
 $("planBorrar").addEventListener("click",function(){var fd=$("fdesp").value;if(!confirm("¿Quitar la lista de despacho del "+fcorta(fd)+"?"))return;delete planes[fd];sv(K_PLAN,planes);renderPlan()});
-$("planFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;var fd=$("fdesp").value;
+$("planFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;if(!archivoOk(f))return;var fd=$("fdesp").value;
   var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
     var a=hojaSimple(wb);
     var hi=-1,cs=-1,cc=-1;for(var i=0;i<Math.min(a.length,15)&&hi<0;i++){var r=a[i].map(norm);var x=r.findIndex(function(h){return h==="sap"||h==="codigo sap"||h==="cod sap"}),y=r.findIndex(function(h){return h==="cant"||h==="cantidad"||h==="cant."});if(x>=0&&y>=0){hi=i;cs=x;cc=y}}
@@ -588,7 +658,7 @@ function leerListaOp(wb,fd){
     if(orden.length)return orden.map(function(k){return mp[k]})}
   return null}
 $("planOpBorrar").addEventListener("click",function(){var fd=$("fdesp").value;if(!confirm("\u00bfQuitar la lista por OP del "+fcorta(fd)+"?"))return;delete planesOp[fd];sv(K_PLANOP,planesOp);renderPlanOp()});
-$("planOpFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;var fd=$("fdesp").value;
+$("planOpFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;if(!archivoOk(f))return;var fd=$("fdesp").value;
   var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
      var orden=leerListaOp(wb,fd);if(orden===null){toast("error","No encontré una lista con OP y cantidad");return}
     if(!orden.length){toast("error","No hay filas con OP");return}
@@ -599,8 +669,8 @@ function confirmarLista(fd,rows,tipo){listaConf={fd:fd,rows:rows};var w=$("confL
   var td="padding:6px;border-bottom:1px solid var(--line,#333);vertical-align:top;font-size:.78rem";
   var h=rows.map(function(r,i){var c=elegidos(r,tipo==="OP"?"all":"0")[0];var opCell=r.cands.length>1&&tipo==="SAP"?"<select data-cs='"+i+"'>"+r.cands.map(function(x,j){return "<option value='"+j+"'>"+esc(x.op)+"</option>"}).join("")+"</select>":"<span class='mono'>"+esc(c.op||"—")+"</span>";
     var sapCell=r.cands.length>1&&tipo==="OP"?"<select data-cs='"+i+"'><option value='all'>Todos juntos ("+r.cands.length+")</option><option value='sep'>Separados ("+r.cands.length+" tarjetas)</option>"+r.cands.map(function(x,j){return "<option value='"+j+"'>Solo "+esc(x.sap||x.desc)+"</option>"}).join("")+"</select>":"<span class='mono'>"+esc(c.sap||"—")+"</span>";
-    return "<tr"+(r.ok?"":" style='opacity:.7'")+"><td style='"+td+"'><input type='checkbox' data-ck='"+i+"'"+(r.ok?" checked":"")+"></td><td style='"+td+"'>"+opCell+"</td><td style='"+td+"'>"+sapCell+"</td><td style='"+td+"' data-cl='"+i+"'>"+esc(c.cliente)+"</td><td style='"+td+"' data-de='"+i+"'>"+(r.ok?esc(c.desc):"<span style='color:var(--red)'>"+esc(r.key)+" no está en Sheets</span>")+"</td><td style='"+td+"'><input type='number' data-q='"+i+"' value='"+r.cant+"' style='width:90px'></td></tr>"}).join("");
-  w.innerHTML="<div class='card' style='max-width:900px;width:100%;max-height:90vh;overflow:auto'><div class='sec'>Confirmar despacho "+fcorta(fd)+" · "+rows.length+" fila(s)</div><div style='font-size:.72rem;color:var(--muted);margin-bottom:6px'>Al aceptar se crean las tarjetas con la cantidad pedida y se envían a Sheets. Luego registras las entregas como siempre.</div><table style='width:100%;border-collapse:collapse'><thead><tr><th></th><th style='text-align:left'>OP</th><th style='text-align:left'>SAP</th><th style='text-align:left'>CLIENTE</th><th style='text-align:left'>DESCRIPCIÓN</th><th style='text-align:left'>CANTIDAD</th></tr></thead><tbody>"+h+"</tbody></table><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn-s' id='confNo'>Cancelar</button><button class='btn-s' id='confSi' style='background:var(--acc,#F2A93B);color:#12161F'>Aceptar y enviar</button></div></div>";
+    return "<tr"+(r.ok?"":" style='opacity:.7'")+"><td style='"+td+"'><input type='checkbox' data-ck='"+i+"'"+(r.ok?" checked":"")+"></td><td style='"+td+"'>"+opCell+"</td><td style='"+td+"'>"+sapCell+"</td><td style='"+td+"' data-cl='"+i+"'>"+esc(c.cliente)+"</td><td style='"+td+"' data-de='"+i+"'>"+(r.ok?esc(c.desc):"<span style='color:var(--red)'>"+esc(r.key)+" no está en Sheets</span>")+"</td><td style='"+td+"'><input type='number' data-q='"+i+"' value='"+r.cant+"' style='width:120px'></td><td style='"+td+"'><input type='number' data-s='"+i+"' min='0' placeholder='0' style='width:120px'></td></tr>"}).join("");
+  w.innerHTML="<div class='card' style='max-width:900px;width:100%;max-height:90vh;overflow:auto'><div class='sec'>Confirmar despacho "+fcorta(fd)+" · "+rows.length+" fila(s)</div><div style='font-size:.72rem;color:var(--muted);margin-bottom:6px'>Al aceptar se crean las tarjetas con la cantidad pedida y se envían a Sheets. Stock inicial = lo que almacén ya tiene de esa OP: cuenta como cubierto y solo se completa la diferencia. Luego registras las entregas como siempre.</div><table style='width:100%;border-collapse:collapse'><thead><tr><th></th><th style='text-align:left'>OP</th><th style='text-align:left'>SAP</th><th style='text-align:left'>CLIENTE</th><th style='text-align:left'>DESCRIPCIÓN</th><th style='text-align:left'>PEDIDO</th><th style='text-align:left'>STOCK INICIAL</th></tr></thead><tbody>"+h+"</tbody></table><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn-s' id='confNo'>Cancelar</button><button class='btn-s' id='confSi' style='background:var(--acc,#F2A93B);color:#12161F'>Aceptar y enviar</button></div></div>";
   w.style.display="flex";
   w.querySelectorAll("[data-cs]").forEach(function(sel){sel.addEventListener("change",function(){var i=+sel.dataset.cs,c=elegidos(rows[i],sel.value)[0];if(sel.value==="sep")c={cliente:rows[i].cands[0].cliente,desc:rows[i].cands.map(function(x){return x.desc}).join(" | ")};w.querySelector("[data-cl='"+i+"']").textContent=c.cliente;w.querySelector("[data-de='"+i+"']").textContent=c.desc})});
   $("confNo").onclick=function(){w.style.display="none";listaConf=null};
@@ -608,21 +678,29 @@ function confirmarLista(fd,rows,tipo){listaConf={fd:fd,rows:rows};var w=$("confL
 function aceptarLista(w){var fd=listaConf.fd,rows=listaConf.rows;
   if(!$("fecha").value){toast("error","Pon la fecha de registro");return}
   if(!$("nombre").value){toast("error","Selecciona el habilitador");return}
-  var nuevos=[],ops={},sinOp=0;
+  var nuevos=[],ops={},sinOp=0,sinQ=0,yaEx=0,act=[],nS=0,sS=0,sMay=[];
   rows.forEach(function(r,i){if(!w.querySelector("[data-ck='"+i+"']").checked)return;var sel=w.querySelector("[data-cs='"+i+"']"),lst=elegidos(r,sel?sel.value:"0"),c=lst[0];var q=parseInt(w.querySelector("[data-q='"+i+"']").value,10)||0;
-    if(!c.op){sinOp++;return}if(!(q>0))return;
-    lst.forEach(function(c){nuevos.push({id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:fd,turno:turno,nombre:$("nombre").value,op:c.op,sap:c.sap,descripcion:c.desc,cliente:c.cliente,pedido:q,empaque:emp,u:0,c:0,total:0,estado:"",creado:new Date().toISOString(),sync:false})});ops[c.op]=1});
-  if(!nuevos.length){toast("error",sinOp?"Las filas marcadas no tienen OP en Sheets":"No hay filas marcadas");return}
+    if(!c.op){sinOp++;return}var qraw=w.querySelector("[data-q='"+i+"']").value;if(!esEntero(qraw)||!(q>0)){sinQ++;return}var sraw=w.querySelector("[data-s='"+i+"']").value.trim();if(sraw!==""&&!esEntero(sraw)){sinQ++;return}var stock=sraw===""?0:parseInt(sraw,10);if(stock>LIM.pedido){sinQ++;return}if(stock>0){nS++;sS+=stock}if(stock>q)sMay.push(c.op);if(q>LIM.pedido&&!confirm("La cantidad "+q+" de "+c.op+" es muy alta. ¿Es correcta?")){sinQ++;return}
+    lst.forEach(function(c,ci){if(registros.some(function(x){return x.op.toLowerCase()===c.op.toLowerCase()&&(x.fdesp||"")===fd&&(x.sap||"")===(c.sap||"")})){yaEx++;act.push({op:c.op,q:q,c:c,stock:stock,hasS:sraw!==""&&ci===0});ops[c.op]=1;return}nuevos.push({id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:fd,turno:turno,nombre:$("nombre").value,op:c.op,sap:c.sap,descripcion:c.desc,cliente:c.cliente,pedido:q,empaque:emp,u:0,c:0,total:0,estado:"",creado:new Date().toISOString(),sync:false});if(ci===0&&stock>0){var nr=nuevos[nuevos.length-1];nr.empaque="stock";nr.u=stock;nr.c=1;nr.total=stock}});ops[c.op]=1});
+  if(!nuevos.length&&!act.length){toast("error",sinOp?"Las filas marcadas no tienen OP en Sheets":(sinQ?"Ninguna fila tiene una cantidad entera válida":"No hay filas marcadas"));return}
+  var avl=[avisoFecha($("fecha").value,"registro"),avisoFecha(fd,"despacho"),sMay.length?"Stock inicial mayor que el pedido en: "+sMay.join(", ")+" (quedarán completas)":""].filter(Boolean);
+  if(!confirm("Se crearán "+nuevos.length+" tarjeta(s) para el "+fcorta(fd)+(yaEx?"\nYa existían "+yaEx+" (solo se actualiza su pedido)":"")+(sinQ?"\n"+sinQ+" fila(s) omitidas por cantidad vacía o inválida":"")+(sinOp?"\n"+sinOp+" fila(s) omitidas sin OP en Sheets":"")+(nS?"\nStock inicial: "+sS+" u en "+nS+" OP":"")+(avl.length?"\n\nAvisos:\n• "+avl.join("\n• "):"")+"\n\n¿Confirmar?"))return;
   var envio=nuevos.slice();
+  act.forEach(function(a){registros.forEach(function(x){if(x.op.toLowerCase()===a.op.toLowerCase()&&(x.fdesp||"")===fd&&x.pedido!==a.q){x.pedido=a.q;x.sync=false;if(envio.indexOf(x)<0)envio.push(x)}})});
   nuevos.forEach(function(r){registros.forEach(function(x){if(nuevos.indexOf(x)<0&&x.op.toLowerCase()===r.op.toLowerCase()&&(x.fdesp||"")===fd&&x.pedido!==r.pedido){x.pedido=r.pedido;x.sync=false;if(envio.indexOf(x)<0)envio.push(x)}})});
+  act.forEach(function(a){if(!a.hasS)return;var op=a.op.toLowerCase(),sap=a.c.sap||"";
+    function mismo(x){return x.op.toLowerCase()===op&&(x.fdesp||"")===fd&&(x.sap||"")===sap}
+    var t=registros.find(function(x){return mismo(x)&&esStock(x)})||(a.stock>0?registros.find(function(x){return mismo(x)&&!esStock(x)&&!(x.total>0)}):null);
+    if(t){if(a.stock>0){t.empaque="stock";t.u=a.stock;t.c=1;t.total=a.stock}else{t.empaque=emp;t.u=0;t.c=0;t.total=0}t.pedido=a.q;t.sync=false;if(envio.indexOf(t)<0)envio.push(t)}
+    else if(a.stock>0){var b=registros.find(mismo)||{};var n2={id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:fd,turno:turno,nombre:$("nombre").value,op:a.c.op,sap:sap,descripcion:a.c.desc||b.descripcion||"",cliente:a.c.cliente||b.cliente||"",pedido:a.q,empaque:"stock",u:a.stock,c:1,total:a.stock,estado:"",creado:new Date().toISOString(),sync:false};registros.unshift(n2);envio.push(n2)}});
   registros=nuevos.concat(registros);
   Object.keys(ops).forEach(function(op){recalcularEstados(op,fd).forEach(function(x){if(envio.indexOf(x)<0)envio.push(x)})});
   sv(K_REG,registros);w.style.display="none";listaConf=null;renderLista();enviar(envio,true);
   toast("ok",nuevos.length+" tarjeta(s) creadas para el "+fcorta(fd)+(sinOp?" · "+sinOp+" sin OP omitidas":""))}
 function renderDespacho(){$("planRes").innerHTML="";$("planOpRes").innerHTML="";$("planBorrar").classList.add("hidden");$("planOpBorrar").classList.add("hidden");var fd=$("fdesp").value;
   var sub=registros.filter(function(r){return (r.fdesp||"")===fd});
-  var tot=sub.reduce(function(a,r){return a+(r.total||0)},0);
-  $("despachoInfo").textContent="Despacho "+fcorta(fd)+": "+sub.length+" entrada(s) · "+tot+" u entregadas";
+  var tot=sub.reduce(function(a,r){return a+(esStock(r)?0:(r.total||0))},0),stk=sub.reduce(function(a,r){return a+(esStock(r)?(r.total||0):0)},0);
+  $("despachoInfo").textContent="Despacho "+fcorta(fd)+": "+sub.length+" entrada(s) · "+tot+" u entregadas"+(stk?" · "+stk+" u de stock inicial":"");
   var c=$("despachoRes");c.innerHTML="";if(!sub.length)return;
   var h=document.createElement("div");h.className="sec";h.style.marginTop="6px";h.textContent="Despacho "+fcorta(fd)+" por OP";c.appendChild(h);
   agrupar(sub).ops.forEach(function(o){c.appendChild(tarjetaOp(o))})}
@@ -641,7 +719,7 @@ function renderLista(){renderDespacho();var c=$("lista");c.innerHTML="";var rs=f
       +'<div style="font-size:.88rem;margin:4px 0 2px">'+esc(r.descripcion)+(r.sap?' <span class="mono" style="font-size:.72rem;color:var(--muted)">SAP '+esc(r.sap)+'</span>':'')+'</div>'
       +'<div class="meta">Despacho <strong>'+fcorta(r.fdesp||r.fecha)+'</strong> · Registro '+fcorta(r.fecha)+' · '+esc(r.turno)+' · '+esc(r.nombre)+(r.sync?' · ☁️':' · ⏳')+'</div>'
       +'<div class="meta">Pedido: <strong>'+(r.pedido||0)+' u</strong></div>'
-      +'<div class="meta">Entregado: '+(r.total?qtxt(r.empaque,r.c,r.u,r.total):'<strong>0 u</strong>')+'</div>';
+      +(esStock(r)?'<div class="meta">Stock inicial en almacén: <strong>'+r.total+' u</strong></div>':'<div class="meta">Entregado: '+(r.total?qtxt(r.empaque,r.c,r.u,r.total):'<strong>0 u</strong>')+'</div>');
     var bar=document.createElement("div");bar.style.cssText="display:flex;gap:8px;margin-top:8px;align-items:center;justify-content:flex-end";
     
     var del=document.createElement("button");del.className="del";del.textContent="Borrar";
@@ -651,7 +729,7 @@ function renderLista(){renderDespacho();var c=$("lista");c.innerHTML="";var rs=f
 $("limpiarFiltro").addEventListener("click",function(){$("fFecha").value="";$("fDesp").value="";$("fTurno").value="";$("fNombre").value="";$("fEstado").value="";$("fTexto").value="";renderLista()});
 
 // ---- Excel con formato (SpreadsheetML: colores, negrita, bordes)
-function xe(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function xe(v){return String(v==null?"":v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
 var BD='<Borders>'+["Top","Bottom","Left","Right"].map(function(q){return '<Border ss:Position="'+q+'" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#B7B7B7"/>'}).join("")+'</Borders>';
 function est(id,font,fill,al){return '<Style ss:ID="'+id+'">'+font+(fill?'<Interior ss:Color="'+fill+'" ss:Pattern="Solid"/>':'')+'<Alignment ss:Horizontal="'+al+'" ss:Vertical="Center" ss:WrapText="1"/>'+BD+'</Style>'}
 var BLANCO='<Font ss:Bold="1" ss:Color="#FFFFFF"/>';
@@ -667,16 +745,16 @@ function filaH(heads){return '<Row ss:Height="22">'+heads.map(function(h){return
 function filaT(t,n){return '<Row ss:Height="28">'+ce(t,"sT",false,n)+'</Row>'}
 function xmlEntregas(rs){
   var g=agrupar(rs);
-  var r1=[filaT("CONTROL DE ENTREGAS",11),filaH(["FECHA DESPACHO","FECHA REGISTRO","TURNO","HABILITADOR","OP","SAP","DESCRIPCIÓN","CLIENTE","PEDIDO (OP)","ENTREGADO","DETALLE","ESTADO"])];
-  rs.forEach(function(r){r1.push('<Row>'+ce(fcorta(r.fdesp||r.fecha),"sK")+ce(fcorta(r.fecha),"sK")+ce(r.turno,"sK")+ce(r.nombre,"sC")+ce(r.op,"sK")+ce(r.sap||"","sK")+ce(r.descripcion,"sC")+ce(r.cliente,"sC")+ce(r.pedido||0,"sP",true)+ce(r.total||0,"sE",true)+ce(r.total?detalle(r):"","sK")+ce(estadoReg(r),EST_STYLE[estadoReg(r)]||"sK")+'</Row>')});
-  var r2=[filaT("RESUMEN POR OP",8),filaH(["DESPACHO","OP","CLIENTE","PEDIDO","ENTREGADO (filtro)","ACUMULADO TOTAL","PENDIENTE","EXCEDENTE","ESTADO"])];
-  g.ops.forEach(function(o){var pd=o.pedido-o.acum,ex=o.pedido>0?Math.max(-pd,0):0;r2.push('<Row>'+ce(fcorta(o.fdesp),"sK")+ce(o.op,"sK")+ce(o.cliente,"sC")+ce(o.pedido,"sP",true)+ce(o.ent,"sE",true)+ce(o.acum,"sN",true)+ce(Math.max(pd,0),pd>0?"sP":"sE",true)+ce(ex,ex>0?"sX":"sN",true)+ce(estadoDe(o.op,o.fdesp),EST_STYLE[estadoDe(o.op,o.fdesp)]||"sK")+'</Row>')});
-  var r3=[filaT("RESUMEN POR SAP",4),filaH(["DESPACHO","SAP","DESCRIPCIÓN","ENTREGADO","OP"])];
-  g.saps.forEach(function(x){r3.push('<Row>'+ce(fcorta(x.fdesp),"sK")+ce(x.sap||"","sK")+ce(x.desc,"sC")+ce(x.ent,"sE",true)+ce(Object.keys(x.ops).join(", "),"sC")+'</Row>')});
+  var r1=[filaT("CONTROL DE ENTREGAS",12),filaH(["FECHA DESPACHO","FECHA REGISTRO","TURNO","HABILITADOR","OP","SAP","DESCRIPCIÓN","CLIENTE","PEDIDO (OP)","STOCK INICIAL","ENTREGADO","DETALLE","ESTADO"])];
+  rs.forEach(function(r){r1.push('<Row>'+ce(fcorta(r.fdesp||r.fecha),"sK")+ce(fcorta(r.fecha),"sK")+ce(r.turno,"sK")+ce(r.nombre,"sC")+ce(r.op,"sK")+ce(r.sap||"","sK")+ce(r.descripcion,"sC")+ce(r.cliente,"sC")+ce(r.pedido||0,"sP",true)+ce(esStock(r)?r.total:"","sN",esStock(r))+ce(esStock(r)?0:(r.total||0),"sE",true)+ce(r.total&&!esStock(r)?detalle(r):"","sK")+ce(estadoReg(r),EST_STYLE[estadoReg(r)]||"sK")+'</Row>')});
+  var r2=[filaT("RESUMEN POR OP",10),filaH(["DESPACHO","OP","CLIENTE","DESCRIPCIÓN","PEDIDO","STOCK INICIAL","ENTREGADO (filtro)","ACUMULADO (stock + entregado)","PENDIENTE","EXCEDENTE","ESTADO"])];
+  g.ops.forEach(function(o){var pd=o.pedido-o.acum,ex=o.pedido>0?Math.max(-pd,0):0;r2.push('<Row>'+ce(fcorta(o.fdesp),"sK")+ce(o.op,"sK")+ce(o.cliente,"sC")+ce(o.desc,"sC")+ce(o.pedido,"sP",true)+ce(o.stock||0,"sN",true)+ce(o.ent,"sE",true)+ce(o.acum,"sN",true)+ce(Math.max(pd,0),pd>0?"sP":"sE",true)+ce(ex,ex>0?"sX":"sN",true)+ce(estadoDe(o.op,o.fdesp),EST_STYLE[estadoDe(o.op,o.fdesp)]||"sK")+'</Row>')});
+  var r3=[filaT("RESUMEN POR SAP",6),filaH(["DESPACHO","SAP","DESCRIPCIÓN","CLIENTE","STOCK INICIAL","ENTREGADO","OP"])];
+  g.saps.forEach(function(x){r3.push('<Row>'+ce(fcorta(x.fdesp),"sK")+ce(x.sap||"","sK")+ce(x.desc,"sC")+ce(x.cliente,"sC")+ce(x.stock||0,"sN",true)+ce(x.ent,"sE",true)+ce(Object.keys(x.ops).join(", "),"sC")+'</Row>')});
   return '<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" xmlns:html="http://www.w3.org/TR/REC-html40">'
-    +ESTILOS+hojaXml("Entregas",[85,85,60,115,85,85,280,160,95,85,130,105],r1)+hojaXml("Resumen OP",[85,90,180,90,120,120,100,100,100],r2)+hojaXml("Resumen SAP",[85,90,300,100,200],r3)+'</Workbook>'}
+    +ESTILOS+hojaXml("Entregas",[85,85,60,115,85,85,280,160,95,95,85,130,105],r1)+hojaXml("Resumen OP",[85,90,180,260,90,95,120,150,100,100,100],r2)+hojaXml("Resumen SAP",[85,90,300,170,100,100,200],r3)+'</Workbook>'}
 function descargar(blob,nombre){var u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=nombre;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},4000);toast("ok","Excel exportado")}
-$("exp").addEventListener("click",function(){var rs=filtrados();if(!rs.length){toast("error","Nada que exportar");return}
+$("exp").addEventListener("click",function(){var fl=filtrados(),rs=filasReporte(fl);if(!rs.length){toast("error","Nada que exportar");return}avisoExport(fl.length,registros.length);
   var nombre="entregas_"+hoy()+".xls",mime="application/vnd.ms-excel";
   try{var blob=new Blob(["\ufeff",xmlEntregas(rs)],{type:mime});var done=false;
     if(navigator.canShare&&window.File){try{var f=new File([blob],nombre,{type:mime});if(navigator.canShare({files:[f]})){navigator.share({files:[f],title:nombre}).then(function(){toast("ok","Excel exportado")}).catch(function(e){if(e&&e.name!=="AbortError")descargar(blob,nombre)});done=true}}catch(e){}}
@@ -730,13 +808,16 @@ function cargarWb(s1,s2,quiet){
   var p=parsePrincipal(s1);if(!p){toast("error","Debe tener columnas OP, Descripción y Cliente");return false}
   var mapa=p.mapa,orden=p.orden.slice();
   if(s2){var m=parseModelos(s2,p);if(m)m.orden.forEach(function(op){if(!mapa[op])orden.push(op);mapa[op]=m.mapa[op]})}
-  catalogo=orden.map(function(op){var it=mapa[op];
+  var nuevoCat=orden.map(function(op){var it=mapa[op];
     if(it.modelos.length>1){it.descripcion="Varios modelos ("+it.modelos.length+")";it.sap="";if(!it.descripcionBase)it.descripcionBase=it.modelos[0].descripcion}
     else{it.descripcion=it.modelos[0].descripcion;it.sap=it.modelos[0].sap;it.descripcionBase=it.descripcion}
     return it});
-  sv(K_CAT,catalogo);renderCfg();if(!quiet)toast("ok","Catálogo: "+catalogo.length+" OP"+(s2?" (con modelos)":""));return true}
+  if(!nuevoCat.length){if(!quiet)toast("error","El catálogo viene vacío");return false}
+  if(catalogo.length>=10&&nuevoCat.length<catalogo.length*0.5){var txtC="El catálogo nuevo trae "+nuevoCat.length+" OP y tienes "+catalogo.length+".";
+    if(quiet){toast("error",txtC+" No se reemplazó");return false}if(!confirm(txtC+"\n¿Reemplazar de todas formas?"))return false}
+  catalogo=nuevoCat;sv(K_CAT,catalogo);renderCfg();if(!quiet)toast("ok","Catálogo: "+catalogo.length+" OP"+(s2?" (con modelos)":""));return true}
 $("impCat").addEventListener("click",function(){$("file").click()});
-$("file").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;
+$("file").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;if(!archivoOk(f))return;
   var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
     cargarWb(wb.Sheets[wb.SheetNames[0]],wb.SheetNames.length>1?wb.Sheets[wb.SheetNames[1]]:null)}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
 function txt(u){return fetch(u,{cache:"no-store"}).then(function(r){if(!r.ok)throw 0;return r.text()})}
@@ -762,10 +843,10 @@ function llamar(payload){var c=cfgSb();if(!c.url)return Promise.reject(new Error
     .then(function(r){return r.text()})
     .then(function(t){var j;try{j=JSON.parse(t)}catch(e){throw new Error("El script no devolvió datos válidos. Implementa una NUEVA VERSIÓN con acceso 'Cualquier persona'")}
       if(!j.ok)throw new Error(j.error||"Error del script");return j})}
-function enviar(rs,msg){if(!cfgSb().url||!rs.length)return Promise.resolve();
+function enviar(rs,msg){rs=soloValidos(rs,msg);if(!cfgSb().url||!rs.length)return Promise.resolve();
   return llamar({action:"upsert",records:rs}).then(function(){rs.forEach(function(r){r.sync=true});sv(K_REG,registros);renderLista();if(msg)toast("ok","Enviado a Sheets ("+rs.length+")")})
     .catch(function(e){if(msg||navigator.onLine)toast("error","Sheets: "+String(e.message).slice(0,120))})}
-function borrarRemoto(id){if(cfgSb().url)llamar({action:"delete",id:id}).catch(function(){})}
+function borrarRemoto(id){encolarDel(id,"registros")}
 function pendientes(){return registros.filter(function(r){return !r.sync})}
 function num(v){return parseInt(v,10)||0}
 function normFecha(v){v=v==null?"":String(v).trim();if(!v)return "";
@@ -775,28 +856,29 @@ function normFecha(v){v=v==null?"":String(v).trim();if(!v)return "";
   if(/^\d{5}(\.\d+)?$/.test(v)){var e=new Date(Date.UTC(1899,11,30)+parseFloat(v)*864e5);return e.toISOString().slice(0,10)}
   var d2=new Date(v);if(!isNaN(d2))return d2.getFullYear()+"-"+("0"+(d2.getMonth()+1)).slice(-2)+"-"+("0"+d2.getDate()).slice(-2);return v}
 function traer(q){if(!cfgSb().url){if(!q)toast("error","Configura la conexión a Sheets");return Promise.resolve()}
-  return llamar({action:"list"}).then(function(j){var n=0,ids={};(j.records||[]).forEach(function(x){ids[String(x.id).trim()]=1});
-    if(q){var a=registros.length;registros=registros.filter(function(r){return !r.sync||ids[r.id]});n+=a-registros.length}
+  return llamar({action:"list"}).then(function(j){if(!Array.isArray(j.records))throw new Error("Respuesta sin lista de registros");var n=0,omit=0,pend=colaDel(),ids={};(j.records||[]).forEach(function(x){ids[String(x.id).trim()]=1});
+    if(q){var locS=registros.filter(function(r){return r.sync}).length,faltan=registros.filter(function(r){return r.sync&&!ids[r.id]}).length;
+      if(faltan>0&&(j.records.length===0||(faltan>5&&faltan>locS*0.3)))avisoPurga(faltan,locS);else{var a=registros.length;registros=registros.filter(function(r){return !r.sync||ids[r.id]});n+=a-registros.length}}
     (j.records||[]).forEach(function(x){
-      ["pedido","u","c","total"].forEach(function(k){x[k]=num(x[k])});x.sync=true;["id","fecha","fdesp","turno","nombre","op","sap","descripcion","cliente","empaque","estado","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});x.fecha=normFecha(x.fecha);x.fdesp=normFecha(x.fdesp);if(!x.fdesp)x.fdesp=x.fecha;
+      if(!recRemotoOk(x,pend,"registros")){omit++;return}["pedido","u","c","total"].forEach(function(k){x[k]=num(x[k])});x.sync=true;["id","fecha","fdesp","turno","nombre","op","sap","descripcion","cliente","empaque","estado","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});x.fecha=normFecha(x.fecha);x.fdesp=normFecha(x.fdesp);if(!x.fdesp)x.fdesp=x.fecha;
       var i=registros.findIndex(function(r){return r.id===x.id});
       if(i===-1){registros.push(x);n++}else if(registros[i].sync){registros[i]=x}
       if(x.nombre&&nombres.indexOf(x.nombre)===-1){nombres.push(x.nombre)}
     });
     nombres.sort(function(a,b){return a.localeCompare(b,"es",{sensitivity:"base"})});sv(K_NOM,nombres);sv(K_REG,registros);pintarNombres();renderLista();
-    if(!q)toast("ok",n+" registro(s) nuevos traídos")}).catch(function(e){if(!q)toast("error","No se pudo traer: "+String(e.message).slice(0,60))})}
+    if(!q)toast("ok",n+" registro(s) nuevos traídos"+(omit?" · "+omit+" omitidos por datos incompletos":""))}).catch(function(e){if(!q)toast("error","No se pudo traer: "+String(e.message).slice(0,60))})}
 $("envSb").addEventListener("click",function(){if(!cfgSb().url){toast("error","Configura la conexión a Sheets");return}
   var p=pendientes();if(!p.length){toast("ok","Todo está sincronizado");return}enviar(p,true)});
 $("traeSb").addEventListener("click",function(){traer(false)});
 // ---- imprimir
 function resumenHtml(rs){var g=agrupar(rs);
-  var a="<h2>Resumen por OP</h2><table><thead><tr><th>Despacho</th><th>OP</th><th>Cliente</th><th>Pedido</th><th>Entregado</th><th>Acumulado</th><th>Pendiente</th><th>Excedente</th><th>Estado</th></tr></thead><tbody>"+g.ops.map(function(o){return "<tr><td class='k'>"+fcorta(o.fdesp)+"</td><td class='k'>"+esc(o.op)+"</td><td>"+esc(o.cliente)+"</td><td class='n p'>"+o.pedido+"</td><td class='n e'>"+o.ent+"</td><td class='n'>"+o.acum+"</td><td class='n'>"+Math.max(o.pedido-o.acum,0)+"</td><td class='n"+(o.pedido>0&&o.acum>o.pedido?" x":"")+"'>"+(o.pedido>0?Math.max(o.acum-o.pedido,0):0)+"</td><td class='k s-"+estadoDe(o.op,o.fdesp)+"'>"+estadoDe(o.op,o.fdesp)+"</td></tr>"}).join("")+"</tbody></table>";
-  var b="<h2>Resumen por SAP</h2><table><thead><tr><th>Despacho</th><th>SAP</th><th>Descripción</th><th>Entregado</th><th>OP</th></tr></thead><tbody>"+g.saps.map(function(x){return "<tr><td class='k'>"+fcorta(x.fdesp)+"</td><td class='k'>"+esc(x.sap||"")+"</td><td>"+esc(x.desc)+"</td><td class='n e'>"+x.ent+"</td><td>"+esc(Object.keys(x.ops).join(", "))+"</td></tr>"}).join("")+"</tbody></table>";
+  var a="<h2>Resumen por OP</h2><table><thead><tr><th>Despacho</th><th>OP</th><th>Cliente</th><th>Descripción</th><th>Pedido</th><th>Stock inicial</th><th>Entregado</th><th>Acum. (stock + entreg.)</th><th>Pendiente</th><th>Excedente</th><th>Estado</th></tr></thead><tbody>"+g.ops.map(function(o){return "<tr><td class='k'>"+fcorta(o.fdesp)+"</td><td class='k'>"+esc(o.op)+"</td><td>"+esc(o.cliente)+"</td><td>"+esc(o.desc)+"</td><td class='n p'>"+o.pedido+"</td><td class='n s'>"+(o.stock||"")+"</td><td class='n e'>"+o.ent+"</td><td class='n'>"+o.acum+"</td><td class='n'>"+Math.max(o.pedido-o.acum,0)+"</td><td class='n"+(o.pedido>0&&o.acum>o.pedido?" x":"")+"'>"+(o.pedido>0?Math.max(o.acum-o.pedido,0):0)+"</td><td class='k s-"+estadoDe(o.op,o.fdesp)+"'>"+estadoDe(o.op,o.fdesp)+"</td></tr>"}).join("")+"</tbody></table>";
+  var b="<h2>Resumen por SAP</h2><table><thead><tr><th>Despacho</th><th>SAP</th><th>Descripción</th><th>Cliente</th><th>Stock inicial</th><th>Entregado</th><th>OP</th></tr></thead><tbody>"+g.saps.map(function(x){return "<tr><td class='k'>"+fcorta(x.fdesp)+"</td><td class='k'>"+esc(x.sap||"")+"</td><td>"+esc(x.desc)+"</td><td>"+esc(x.cliente)+"</td><td class='n s'>"+(x.stock||"")+"</td><td class='n e'>"+x.ent+"</td><td>"+esc(Object.keys(x.ops).join(", "))+"</td></tr>"}).join("")+"</tbody></table>";
   return a+b}
-function imprimir(){var rs=filtrados().filter(function(r){return (r.total||0)>0});if(!rs.length){toast("error","Nada que imprimir (sin entregas)");return}
+function imprimir(){var rs=filasReporte(filtrados());if(!rs.length){toast("error","Nada que imprimir");return}
   var filas=rs.map(function(r){
-    return "<tr><td class='k'>"+fcorta(r.fdesp||r.fecha)+"</td><td class='k'>"+fcorta(r.fecha)+"</td><td class='k'>"+esc(r.turno)+"</td><td>"+esc(r.nombre)+"</td><td class='k'>"+esc(r.op)+"</td><td class='k'>"+esc(r.sap||"")+"</td><td>"+esc(r.descripcion)+"</td><td>"+esc(r.cliente)+"</td><td class='n p'>"+(r.pedido||0)+"</td><td class='n e'>"+(r.total||0)+"</td><td class='k'>"+esc(r.total?detalle(r):"")+"</td><td class='k "+(estadoReg(r)?"s-"+estadoReg(r):"")+"'>"+esc(estadoReg(r))+"</td></tr>"}).join("");
-  var html="<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>Control de Entregas</title><style>@page{size:A4 landscape;margin:10mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;font-size:10px;color:#111}h1{font-size:15px;margin:0 0 6px}h2{font-size:12px;margin:14px 0 4px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #888;padding:3px 5px;text-align:left}th{background:#F2A93B;text-align:center}.k{text-align:center}.n{text-align:right;font-weight:700;white-space:nowrap}.e{background:#E6F4EA}.p{background:#FDEBD0}.x{background:#FADBD8;color:#C0392B}.s-COMPLETO{background:#38A169;color:#fff;font-weight:700}.s-ENPRODUCCION{background:#4299E1;color:#fff;font-weight:700}.s-INCOMPLETO{background:#E53E3E;color:#fff;font-weight:700}</style></head><body><h1>Control de Entregas</h1><table><thead><tr><th>Despacho</th><th>Registro</th><th>Turno</th><th>Habilitador</th><th>OP</th><th>SAP</th><th>Descripción</th><th>Cliente</th><th>Pedido</th><th>Entregado</th><th>Detalle</th><th>Estado</th></tr></thead><tbody>"+filas+"</tbody></table>"+resumenHtml(rs)+"</body></html>";
+    return "<tr><td class='k'>"+fcorta(r.fdesp||r.fecha)+"</td><td class='k'>"+fcorta(r.fecha)+"</td><td class='k'>"+esc(r.turno)+"</td><td>"+esc(r.nombre)+"</td><td class='k'>"+esc(r.op)+"</td><td class='k'>"+esc(r.sap||"")+"</td><td>"+esc(r.descripcion)+"</td><td>"+esc(r.cliente)+"</td><td class='n p'>"+(r.pedido||0)+"</td><td class='n s'>"+(esStock(r)?r.total:"")+"</td><td class='n e'>"+(esStock(r)?0:(r.total||0))+"</td><td class='k'>"+esc(r.total&&!esStock(r)?detalle(r):"")+"</td><td class='k "+(estadoReg(r)?"s-"+estadoReg(r):"")+"'>"+esc(estadoReg(r))+"</td></tr>"}).join("");
+  var html="<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>Control de Entregas</title><style>@page{size:A4 landscape;margin:10mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;font-size:10px;color:#111}h1{font-size:15px;margin:0 0 6px}h2{font-size:12px;margin:14px 0 4px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #888;padding:3px 5px;text-align:left}th{background:#F2A93B;text-align:center}.k{text-align:center}.n{text-align:right;font-weight:700;white-space:nowrap}.e{background:#E6F4EA}.p{background:#FDEBD0}.s{background:#E3F2FD}.x{background:#FADBD8;color:#C0392B}.s-COMPLETO{background:#38A169;color:#fff;font-weight:700}.s-ENPRODUCCION{background:#4299E1;color:#fff;font-weight:700}.s-INCOMPLETO{background:#E53E3E;color:#fff;font-weight:700}</style></head><body><h1>Control de Entregas</h1><table><thead><tr><th>Despacho</th><th>Registro</th><th>Turno</th><th>Habilitador</th><th>OP</th><th>SAP</th><th>Descripción</th><th>Cliente</th><th>Pedido</th><th>Stock inicial</th><th>Entregado</th><th>Detalle</th><th>Estado</th></tr></thead><tbody>"+filas+"</tbody></table>"+resumenHtml(rs)+"</body></html>";
   var fr=document.createElement("iframe");fr.style.cssText="position:fixed;right:0;bottom:0;width:0;height:0;border:0";document.body.appendChild(fr);
   var d=fr.contentWindow.document;d.open();d.write(html);d.close();
   setTimeout(function(){fr.contentWindow.focus();fr.contentWindow.print();setTimeout(function(){fr.remove()},2000)},300)}
@@ -837,6 +919,9 @@ $("iGuardar").addEventListener("click",function(){
   if(!$("iOp").value.trim()){toast("error","Ingresa la OP");return}
   var m=buscar($("iOp").value);if(m&&m.modelos.length>1&&iModelo<0){toast("error","Elige el modelo de la OP");return}
   if(!(iCalc()>0)){toast("error","Ingresa unidades y cantidad");return}
+  if(!esEntero($("iU").value)||!esEntero($("iC").value)){toast("error","Unidades y cantidad deben ser números enteros (sin decimales ni negativos)");return}
+  if(!confirmarAvisos(avisosIngreso({fecha:$("iFecha").value,op:$("iOp").value.trim(),desc:$("iDesc").value.trim(),cliente:$("iCliente").value.trim(),u:$("iU").value,c:$("iC").value})))return;
+  if(bloqueado())return;
   var r={id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("iFecha").value,turno:iTurno,nombre:$("iNombre").value,op:$("iOp").value.trim(),sap:$("iSap").value.trim(),descripcion:$("iDesc").value.trim(),cliente:$("iCliente").value.trim(),empaque:iEmp,u:parseInt($("iU").value,10)||0,c:parseInt($("iC").value,10)||0,creado:new Date().toISOString(),sync:false};
   r.total=r.u*r.c;
   ingresos.unshift(r);sv(K_ING,ingresos);enviarIng([r]);
@@ -864,31 +949,32 @@ function renderIng(){var c=$("iLista");c.innerHTML="";var rs=iFiltrados();$("iCu
 $("iLimpiar").addEventListener("click",function(){$("iFFecha").value="";$("iFTurno").value="";$("iFNombre").value="";$("iFTexto").value="";renderIng()});
 
 // Sheets (hoja "Ingresos")
-function enviarIng(rs,msg){if(!rs.length)return Promise.resolve();
+function enviarIng(rs,msg){rs=soloValidos(rs,msg);if(!rs.length)return Promise.resolve();
   return llamar({action:"upsert",tabla:"ingresos",records:rs}).then(function(){rs.forEach(function(r){r.sync=true});sv(K_ING,ingresos);renderIng();if(msg)toast("ok","Enviado a Sheets ("+rs.length+")")})
     .catch(function(e){if(msg||navigator.onLine)toast("error","Sheets: "+String(e.message).slice(0,120))})}
 function pendIng(){return ingresos.filter(function(r){return !r.sync})}
-function borrarIng(id){llamar({action:"delete",tabla:"ingresos",id:id}).catch(function(){})}
+function borrarIng(id){encolarDel(id,"ingresos")}
 $("iEnv").addEventListener("click",function(){var p=pendIng();if(!p.length){toast("ok","Todo está sincronizado");return}enviarIng(p,true)});
 function traerIng(q){
-  return llamar({action:"list",tabla:"ingresos"}).then(function(j){var n=0,ids={};(j.records||[]).forEach(function(x){ids[String(x.id).trim()]=1});
-    if(q){ingresos=ingresos.filter(function(r){return !r.sync||ids[r.id]})}
+  return llamar({action:"list",tabla:"ingresos"}).then(function(j){if(!Array.isArray(j.records))throw new Error("Respuesta sin lista de ingresos");var n=0,omit=0,pend=colaDel(),ids={};(j.records||[]).forEach(function(x){ids[String(x.id).trim()]=1});
+    if(q){var locI=ingresos.filter(function(r){return r.sync}).length,faltI=ingresos.filter(function(r){return r.sync&&!ids[r.id]}).length;
+      if(faltI>0&&(j.records.length===0||(faltI>5&&faltI>locI*0.3)))avisoPurga(faltI,locI);else{ingresos=ingresos.filter(function(r){return !r.sync||ids[r.id]})}}
     (j.records||[]).forEach(function(x){
-      ["u","c","total"].forEach(function(k){x[k]=num(x[k])});
+      if(!recRemotoOk(x,pend,"ingresos")){omit++;return}["u","c","total"].forEach(function(k){x[k]=num(x[k])});
       ["id","fecha","turno","nombre","op","sap","descripcion","cliente","empaque","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});
       x.fecha=normFecha(x.fecha);x.sync=true;var i=ingresos.findIndex(function(r){return r.id===x.id});
       if(i===-1){ingresos.push(x);n++}else if(ingresos[i].sync){ingresos[i]=x}
       if(x.nombre&&nombres.indexOf(x.nombre)===-1)nombres.push(x.nombre)});
     nombres.sort(function(a,b){return a.localeCompare(b,"es",{sensitivity:"base"})});sv(K_NOM,nombres);sv(K_ING,ingresos);pintarNombres();renderIng();
-    if(!q)toast("ok",n+" ingreso(s) nuevos traídos")}).catch(function(e){if(!q)toast("error","No se pudo traer: "+String(e.message).slice(0,60))})}
+    if(!q)toast("ok",n+" ingreso(s) nuevos traídos"+(omit?" · "+omit+" omitidos por datos incompletos":""))}).catch(function(e){if(!q)toast("error","No se pudo traer: "+String(e.message).slice(0,60))})}
 $("iTraer").addEventListener("click",function(){traerIng(false)});
 // ---- sincronización automática entre dispositivos
 var syncOcupado=false,syncDesde=0;
 function marcaSync(ok){var el=document.getElementById("syncMarca");if(!el){el=document.createElement("div");el.id="syncMarca";el.style.cssText="position:fixed;right:8px;bottom:8px;font:12px sans-serif;padding:4px 8px;border-radius:12px;background:rgba(0,0,0,.65);color:#fff;z-index:9999;cursor:pointer";el.title="Tocar para sincronizar ahora";el.onclick=function(){syncOcupado=false;autoSync()};document.body.appendChild(el)}
-  var d=new Date();el.textContent=(ok?"Sincronizado ":"Sin conexión con Sheets ")+("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+":"+("0"+d.getSeconds()).slice(-2)}
+  var d=new Date();el.textContent=(ok?"Sincronizado ":"Sin conexión con Sheets ")+("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+":"+("0"+d.getSeconds()).slice(-2)+pendTxt()}
 function autoSync(){if(syncOcupado&&Date.now()-syncDesde<30000)return;if(!navigator.onLine||!cfgSb().url)return;syncOcupado=true;syncDesde=Date.now();
   var pr=pendientes(),pi=pendIng();
-  Promise.resolve().then(function(){return pr.length?enviar(pr,false):0}).then(function(){return pi.length?enviarIng(pi,false):0})
+  Promise.resolve().then(procesarDel).then(function(){return pr.length?enviar(pr,false):0}).then(function(){return pi.length?enviarIng(pi,false):0})
     .then(function(){return traer(true)}).then(function(){return traerIng(true)})
     .then(function(){opPedidoVista="";try{sincronizarPedido()}catch(e){}})
     .then(function(){marcaSync(true)},function(){marcaSync(false)}).then(function(){syncOcupado=false})}
@@ -907,7 +993,7 @@ function guardarXls(xml,nombre){var mime="application/vnd.ms-excel";
   try{var blob=new Blob(["\ufeff",xml],{type:mime});var done=false;
     if(navigator.canShare&&window.File){try{var f=new File([blob],nombre,{type:mime});if(navigator.canShare({files:[f]})){navigator.share({files:[f],title:nombre}).then(function(){toast("ok","Excel exportado")}).catch(function(e){if(e&&e.name!=="AbortError")descargar(blob,nombre)});done=true}}catch(e){}}
     if(!done)descargar(blob,nombre)}catch(e){toast("error","No se pudo exportar")}}
-$("iExp").addEventListener("click",function(){var rs=iFiltrados();if(!rs.length){toast("error","Nada que exportar");return}guardarXls(xmlIngresos(rs),"ingresos_"+hoy()+".xls")});
+$("iExp").addEventListener("click",function(){var rs=iFiltrados();if(!rs.length){toast("error","Nada que exportar");return}avisoExport(rs.length,ingresos.length);guardarXls(xmlIngresos(rs),"ingresos_"+hoy()+".xls")});
 $("iImp").addEventListener("click",function(){var rs=iFiltrados();if(!rs.length){toast("error","Nada que imprimir");return}
   var filas=rs.map(function(r){return "<tr><td class='k'>"+fcorta(r.fecha)+"</td><td class='k'>"+esc(r.turno)+"</td><td>"+esc(r.nombre)+"</td><td class='k'>"+esc(r.op)+"</td><td class='k'>"+esc(r.sap||"")+"</td><td>"+esc(r.descripcion)+"</td><td>"+esc(r.cliente)+"</td><td class='n e'>"+(r.total||0)+"</td><td class='k'>"+esc(detalle(r))+"</td></tr>"}).join("");
   var html="<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>Ingresos a almacén</title><style>@page{size:A4 landscape;margin:10mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;font-size:10px;color:#111}h1{font-size:15px;margin:0 0 6px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #888;padding:3px 5px;text-align:left}th{background:#F2A93B;text-align:center}.k{text-align:center}.n{text-align:right;font-weight:700;white-space:nowrap}.e{background:#E6F4EA}</style></head><body><h1>Ingresos al almacén</h1><table><thead><tr><th>Fecha</th><th>Turno</th><th>Habilitador</th><th>OP</th><th>SAP</th><th>Descripción</th><th>Cliente</th><th>Entregado</th><th>Detalle</th></tr></thead><tbody>"+filas+"</tbody></table></body></html>";
@@ -977,6 +1063,9 @@ function gInfo(i){var r=grid[i],fd=fdActual(),o={err:[],warn:[]};o.vacia=gVacia(
   if(!op)o.err.push("Falta OP");else if(!o.m)o.warn.push("OP no está en Sheets");
   if(!(o.ped>0))o.err.push("Falta pedido");
   if(!(parseInt(r.u,10)>0))o.err.push("Falta unid.");if(!(parseInt(r.c,10)>0))o.err.push("Falta cant.");
+  if(r.u!==""&&!esEntero(r.u))o.err.push("Unid. no entera");if(r.c!==""&&!esEntero(r.c))o.err.push("Cant. no entera");if(r.pedido!==""&&!esEntero(r.pedido))o.err.push("Pedido no entero");
+  avisoCant(parseInt(r.u,10)||0,parseInt(r.c,10)||0).forEach(function(a){o.warn.push(a)});
+  var pp0=ultimoPedido(op,fd);if(r.pedido!==""&&pp0>0&&pp0!==o.ped)o.warn.push("Pedido cambia de "+pp0+" a "+o.ped);
   if(o.ped>0&&o.total>0){var fin=prev+o.total;if(fin>o.ped)o.warn.push("Excede pedido en "+(fin-o.ped));else if(fin===o.ped)o.cierra=true;else o.falta=o.ped-fin}
   if(dup)o.warn.push("Repetida en la tabla");
   var rec=registros.find(function(x){return x.op.toLowerCase()===op.toLowerCase()&&(x.fdesp||"")===fd&&x.u===(parseInt(r.u,10)||0)&&x.c===(parseInt(r.c,10)||0)&&x.total>0&&(Date.now()-new Date(x.creado).getTime())<15*60000});
@@ -1039,7 +1128,7 @@ function gGuardarTodo(){if(gGuardando)return;
   if(!$("fdesp").value){toast("error","Pon la fecha de despacho");$("fdesp").focus();return}
   if(!$("fecha").value){toast("error","Pon la fecha de registro");$("fecha").focus();return}
   if(!$("nombre").value){toast("error","Selecciona el habilitador");$("nombre").focus();return}
-  var fd=fdActual(),ok=[],avisos=[],errs=0;grid.forEach(function(r,i){var o=gInfo(i);if(o.vacia)return;if(o.err.length){errs++;return}ok.push({i:i,r:r,o:o});if(o.warn.length)avisos.push("Fila "+(i+1)+" ("+r.op+"): "+o.warn.join(", "))});
+  var fd=fdActual(),ok=[],avisos=[avisoFecha($("fecha").value,"registro"),avisoFecha(fdActual(),"despacho")].filter(Boolean),errs=0;grid.forEach(function(r,i){var o=gInfo(i);if(o.vacia)return;if(o.err.length){errs++;return}ok.push({i:i,r:r,o:o});if(o.warn.length)avisos.push("Fila "+(i+1)+" ("+r.op+"): "+o.warn.join(", "))});
   if(!ok.length){toast("error","Ninguna fila está lista. Revisa las marcadas en rojo");return}
   if(avisos.length&&!confirm("Revisa antes de guardar:\n\n"+avisos.join("\n")+"\n\n¿Guardar de todas formas?"))return;
   if(!confirm("Se guardarán "+ok.length+" registro(s) para el despacho del "+fcorta(fd)+(errs?"\n("+errs+" fila(s) con errores quedan en la tabla)":"")+".\n¿Confirmar?"))return;
@@ -1073,7 +1162,7 @@ function igInfo(i){var r=igrid[i],o={err:[],warn:[]};o.vacia=igVacia(r);if(o.vac
   var op=r.op.trim(),u=parseInt(r.u,10)||0,c=parseInt(r.c,10)||0;o.m=buscar(op);o.mo=igModelo(r,o.m);o.total=u*c;
   if(!op)o.err.push("Falta OP");else if(!o.m)o.warn.push("OP no está en Sheets");
   if(o.m&&(o.m.modelos||[]).length>1&&r.mod==="")o.err.push("Elige modelo");
-  if(!(u>0))o.err.push("Falta unid.");if(!(c>0))o.err.push("Falta cant.");
+  if(!(u>0))o.err.push("Falta unid.");if(!(c>0))o.err.push("Falta cant.");if(r.u!==""&&!esEntero(r.u))o.err.push("Unid. no entera");if(r.c!==""&&!esEntero(r.c))o.err.push("Cant. no entera");avisoCant(u,c).forEach(function(x){o.warn.push(x)});
   var dup=false;for(var j=0;j<i;j++){var g=igrid[j];if(op&&u>0&&g.op.trim().toLowerCase()===op.toLowerCase()&&g.mod===r.mod&&(parseInt(g.u,10)||0)===u&&(parseInt(g.c,10)||0)===c)dup=true}
   if(dup)o.warn.push("Repetida en la tabla");
   var f=$("iFecha").value;
@@ -1129,7 +1218,7 @@ $("igLimpiar").addEventListener("click",function(){if(igrid.some(function(r){ret
 function igGuardarTodo(){if(igGuardando)return;
   if(!$("iFecha").value){toast("error","Pon la fecha");$("iFecha").focus();return}
   if(!$("iNombre").value){toast("error","Selecciona el habilitador");$("iNombre").focus();return}
-  var ok=[],avisos=[],errs=0;igrid.forEach(function(r,i){var o=igInfo(i);if(o.vacia)return;if(o.err.length){errs++;return}ok.push({i:i,r:r,o:o});if(o.warn.length)avisos.push("Fila "+(i+1)+" ("+r.op+"): "+o.warn.join(", "))});
+  var ok=[],avisos=[avisoFecha($("iFecha").value,"ingreso")].filter(Boolean),errs=0;igrid.forEach(function(r,i){var o=igInfo(i);if(o.vacia)return;if(o.err.length){errs++;return}ok.push({i:i,r:r,o:o});if(o.warn.length)avisos.push("Fila "+(i+1)+" ("+r.op+"): "+o.warn.join(", "))});
   if(!ok.length){toast("error","Ninguna fila está lista. Revisa las marcadas en rojo");return}
   if(avisos.length&&!confirm("Revisa antes de guardar:\n\n"+avisos.join("\n")+"\n\n¿Guardar de todas formas?"))return;
   if(!confirm("Se guardarán "+ok.length+" ingreso(s) del "+fcorta($("iFecha").value)+(errs?"\n("+errs+" fila(s) con errores quedan en la tabla)":"")+".\n¿Confirmar?"))return;
@@ -1149,6 +1238,27 @@ $("iFecha").addEventListener("change",igCargar);
   if(igCatN!==catalogo.length&&!($("igBody").contains(document.activeElement))){igCatN=catalogo.length;igrid.forEach(function(r,i){igModSel(i)})}
   igActualizar()}})();
 igCargar();
+// ===== Respaldo y restauración (solo agrega, nunca pisa ni borra) =====
+var K_RES="ctrl_ultimo_respaldo";
+function pintarRes(){var e=$("resInfo");if(!e)return;var f=ld(K_RES,null);e.textContent=f?"Último respaldo descargado: "+f:"Aún no has descargado ningún respaldo en este equipo"}
+$("resBaj").addEventListener("click",function(){var o={version:1,fecha:new Date().toISOString(),registros:registros,ingresos:ingresos,habilitadores:nombres};
+  try{var blob=new Blob([JSON.stringify(o)],{type:"application/json"}),u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download="respaldo_entregas_"+hoy()+".json";document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},4000);
+    sv(K_RES,hoy()+" "+new Date().toTimeString().slice(0,5));pintarRes();toast("ok","Respaldo descargado: "+registros.length+" registros y "+ingresos.length+" ingresos")}catch(e){toast("error","No se pudo generar el respaldo")}});
+$("resSub").addEventListener("click",function(){$("resFile").click()});
+$("resFile").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;
+  if(!/\.json$/i.test(f.name)||f.size===0||f.size>2e7){toast("error","Elige un respaldo .json válido");return}
+  var rd=new FileReader();rd.onload=function(ev){var o;try{o=JSON.parse(ev.target.result)}catch(x){toast("error","El archivo no es un respaldo válido");return}
+    if(!o||typeof o!=="object"||(!Array.isArray(o.registros)&&!Array.isArray(o.ingresos))){toast("error","El archivo no tiene registros ni ingresos");return}
+    function prep(arr){arr=Array.isArray(arr)?arr:[];var ok=arr.filter(validoRec);return {ok:ok,mal:arr.length-ok.length}}
+    var R=prep(o.registros),I=prep(o.ingresos),idsR={},idsI={};registros.forEach(function(r){idsR[r.id]=1});ingresos.forEach(function(r){idsI[r.id]=1});
+    var nR=R.ok.filter(function(r){return !idsR[r.id]}),nI=I.ok.filter(function(r){return !idsI[r.id]}),mal=R.mal+I.mal;
+    if(!nR.length&&!nI.length){toast("ok","No hay nada nuevo que restaurar"+(mal?" ("+mal+" con datos incompletos omitidos)":""));return}
+    if(!confirm("Respaldo del "+String(o.fecha||"").slice(0,10)+":\n• "+nR.length+" registro(s) y "+nI.length+" ingreso(s) que no existen aquí se agregarán\n• "+((R.ok.length-nR.length)+(I.ok.length-nI.length))+" ya existen y no se tocan"+(mal?"\n• "+mal+" con datos incompletos se omiten":"")+"\n\n¿Restaurar?"))return;
+    nR.forEach(function(r){r.sync=false});nI.forEach(function(r){r.sync=false});registros=registros.concat(nR);ingresos=ingresos.concat(nI);
+    (Array.isArray(o.habilitadores)?o.habilitadores:[]).concat(nR.concat(nI).map(function(r){return r.nombre})).forEach(function(n){n=String(n||"").trim();if(n&&nombres.indexOf(n)===-1)nombres.push(n)});
+    nombres.sort(function(a,b){return a.localeCompare(b,"es",{sensitivity:"base"})});sv(K_NOM,nombres);sv(K_REG,registros);sv(K_ING,ingresos);pintarNombres();renderLista();renderIng();
+    toast("ok","Restaurado: "+nR.length+" registro(s) y "+nI.length+" ingreso(s)")};rd.readAsText(f)});
+pintarRes();
 })();
 </script>
 <script>
