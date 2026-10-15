@@ -3,7 +3,7 @@
    - Íconos y manifest: copia guardada primero.
    - Librería de Excel y tipografías: se guardan para poder usarlas sin conexión.
    - Sheets, Apps Script y los CSV publicados NUNCA se guardan: siempre van directo a la red. */
-var VERSION = "entregas-v1";
+var VERSION = "entregas-v2";
 var SHELL = ["./", "index.html", "manifest.json", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/apple-touch-icon.png"];
 var CDN = ["cdnjs.cloudflare.com", "fonts.googleapis.com", "fonts.gstatic.com"];
 
