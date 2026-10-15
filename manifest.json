@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "Control de Entregas",
-  "short_name": "Entregas",
+  "name": "Control Entregas",
+  "short_name": "Entregas v2",
   "description": "Registro de entregas de despacho e ingresos a almacén",
   "lang": "es",
   "start_url": "./",
