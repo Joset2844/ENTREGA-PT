@@ -683,21 +683,22 @@ function confirmarLista(fd,rows,tipo){listaConf={fd:fd,rows:rows};var w=$("confL
 function aceptarLista(w){var fd=listaConf.fd,rows=listaConf.rows;
   if(!$("fecha").value){toast("error","Pon la fecha de registro");return}
   if(!$("nombre").value){toast("error","Selecciona el habilitador");return}
-  var nuevos=[],ops={},sinOp=0,sinQ=0,yaEx=0,act=[],nS=0,sS=0,sMay=[];
+  var nuevos=[],ops={},sinOp=0,sinQ=0,yaEx=0,act=[],nS=0,sS=0,sMay=[],ordN=0;
   rows.forEach(function(r,i){if(!w.querySelector("[data-ck='"+i+"']").checked)return;var sel=w.querySelector("[data-cs='"+i+"']"),lst=elegidos(r,sel?sel.value:"0"),c=lst[0];var q=parseInt(w.querySelector("[data-q='"+i+"']").value,10)||0;
     if(!c.op){sinOp++;return}var qraw=w.querySelector("[data-q='"+i+"']").value;if(!esEntero(qraw)||!(q>0)){sinQ++;return}var sraw=w.querySelector("[data-s='"+i+"']").value.trim();if(sraw!==""&&!esEntero(sraw)){sinQ++;return}var stock=sraw===""?0:parseInt(sraw,10);if(stock>LIM.pedido){sinQ++;return}if(stock>0){nS++;sS+=stock}if(stock>q)sMay.push(c.op);if(q>LIM.pedido&&!confirm("La cantidad "+q+" de "+c.op+" es muy alta. ¿Es correcta?")){sinQ++;return}
-    lst.forEach(function(c,ci){if(registros.some(function(x){return x.op.toLowerCase()===c.op.toLowerCase()&&(x.fdesp||"")===fd&&(x.sap||"")===(c.sap||"")})){yaEx++;act.push({op:c.op,q:q,c:c,stock:stock,hasS:sraw!==""&&ci===0});ops[c.op]=1;return}nuevos.push({id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:fd,turno:turno,nombre:$("nombre").value,op:c.op,sap:c.sap,descripcion:c.desc,cliente:c.cliente,pedido:q,empaque:emp,u:0,c:0,total:0,estado:"",creado:new Date().toISOString(),sync:false});if(ci===0&&stock>0){var nr=nuevos[nuevos.length-1];nr.empaque="stock";nr.u=stock;nr.c=1;nr.total=stock}});ops[c.op]=1});
+    lst.forEach(function(c,ci){var ordL=++ordN;if(registros.some(function(x){return x.op.toLowerCase()===c.op.toLowerCase()&&(x.fdesp||"")===fd&&(x.sap||"")===(c.sap||"")})){yaEx++;act.push({op:c.op,q:q,c:c,stock:stock,hasS:sraw!==""&&ci===0,ord:ordL});ops[c.op]=1;return}nuevos.push({id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:fd,turno:turno,nombre:$("nombre").value,op:c.op,sap:c.sap,descripcion:c.desc,cliente:c.cliente,pedido:q,empaque:emp,u:0,c:0,total:0,estado:"",creado:new Date().toISOString(),sync:false,ord:ordL});if(ci===0&&stock>0){var nr=nuevos[nuevos.length-1];nr.empaque="stock";nr.u=stock;nr.c=1;nr.total=stock}});ops[c.op]=1});
   if(!nuevos.length&&!act.length){toast("error",sinOp?"Las filas marcadas no tienen OP en Sheets":(sinQ?"Ninguna fila tiene una cantidad entera válida":"No hay filas marcadas"));return}
   var avl=[avisoFecha($("fecha").value,"registro"),avisoFecha(fd,"despacho"),sMay.length?"Stock inicial mayor que el pedido en: "+sMay.join(", ")+" (quedarán completas)":""].filter(Boolean);
   if(!confirm("Se crearán "+nuevos.length+" tarjeta(s) para el "+fcorta(fd)+(yaEx?"\nYa existían "+yaEx+" (solo se actualiza su pedido)":"")+(sinQ?"\n"+sinQ+" fila(s) omitidas por cantidad vacía o inválida":"")+(sinOp?"\n"+sinOp+" fila(s) omitidas sin OP en Sheets":"")+(nS?"\nStock inicial: "+sS+" u en "+nS+" OP":"")+(avl.length?"\n\nAvisos:\n• "+avl.join("\n• "):"")+"\n\n¿Confirmar?"))return;
   var envio=nuevos.slice();
   act.forEach(function(a){registros.forEach(function(x){if(x.op.toLowerCase()===a.op.toLowerCase()&&(x.fdesp||"")===fd&&x.pedido!==a.q){x.pedido=a.q;x.sync=false;if(envio.indexOf(x)<0)envio.push(x)}})});
+  act.forEach(function(a){registros.forEach(function(x){if(x.op.toLowerCase()===a.op.toLowerCase()&&(x.fdesp||"")===fd&&(x.sap||"")===(a.c.sap||"")&&x.ord!==a.ord){x.ord=a.ord;x.sync=false;if(envio.indexOf(x)<0)envio.push(x)}})});
   nuevos.forEach(function(r){registros.forEach(function(x){if(nuevos.indexOf(x)<0&&x.op.toLowerCase()===r.op.toLowerCase()&&(x.fdesp||"")===fd&&x.pedido!==r.pedido){x.pedido=r.pedido;x.sync=false;if(envio.indexOf(x)<0)envio.push(x)}})});
   act.forEach(function(a){if(!a.hasS)return;var op=a.op.toLowerCase(),sap=a.c.sap||"";
     function mismo(x){return x.op.toLowerCase()===op&&(x.fdesp||"")===fd&&(x.sap||"")===sap}
     var t=registros.find(function(x){return mismo(x)&&esStock(x)})||(a.stock>0?registros.find(function(x){return mismo(x)&&!esStock(x)&&!(x.total>0)}):null);
     if(t){if(a.stock>0){t.empaque="stock";t.u=a.stock;t.c=1;t.total=a.stock}else{t.empaque=emp;t.u=0;t.c=0;t.total=0}t.pedido=a.q;t.sync=false;if(envio.indexOf(t)<0)envio.push(t)}
-    else if(a.stock>0){var b=registros.find(mismo)||{};var n2={id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:fd,turno:turno,nombre:$("nombre").value,op:a.c.op,sap:sap,descripcion:a.c.desc||b.descripcion||"",cliente:a.c.cliente||b.cliente||"",pedido:a.q,empaque:"stock",u:a.stock,c:1,total:a.stock,estado:"",creado:new Date().toISOString(),sync:false};registros.unshift(n2);envio.push(n2)}});
+    else if(a.stock>0){var b=registros.find(mismo)||{};var n2={id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:fd,turno:turno,nombre:$("nombre").value,op:a.c.op,sap:sap,descripcion:a.c.desc||b.descripcion||"",cliente:a.c.cliente||b.cliente||"",pedido:a.q,empaque:"stock",u:a.stock,c:1,total:a.stock,estado:"",creado:new Date().toISOString(),sync:false,ord:a.ord};registros.unshift(n2);envio.push(n2)}});
   registros=nuevos.concat(registros);
   Object.keys(ops).forEach(function(op){recalcularEstados(op,fd).forEach(function(x){if(envio.indexOf(x)<0)envio.push(x)})});
   sv(K_REG,registros);w.style.display="none";listaConf=null;renderLista();enviar(envio,true);
@@ -748,20 +749,48 @@ function detalle(r){var n=r.empaque==="caja"?(r.c===1?"caja":"cajas"):(r.c===1?"
 function hojaXml(nombre,anchos,rows){return '<Worksheet ss:Name="'+nombre+'"><Table ss:DefaultColumnWidth="70">'+anchos.map(function(w){return '<Column ss:Width="'+w+'"/>'}).join("")+rows.join("")+'</Table><WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel"><PageSetup><Layout x:Orientation="Landscape"/></PageSetup></WorksheetOptions></Worksheet>'}
 function filaH(heads){return '<Row ss:Height="22">'+heads.map(function(h){return ce(h,"sH")}).join("")+'</Row>'}
 function filaT(t,n){return '<Row ss:Height="28">'+ce(t,"sT",false,n)+'</Row>'}
-function xmlEntregas(rs){
-  var g=agrupar(rs);
-  var r1=[filaT("CONTROL DE ENTREGAS",12),filaH(["FECHA DESPACHO","FECHA REGISTRO","TURNO","HABILITADOR","OP","SAP","DESCRIPCIÓN","CLIENTE","PEDIDO (OP)","STOCK INICIAL","ENTREGADO","DETALLE","ESTADO"])];
-  rs.forEach(function(r){r1.push('<Row>'+ce(fcorta(r.fdesp||r.fecha),"sK")+ce(fcorta(r.fecha),"sK")+ce(r.turno,"sK")+ce(r.nombre,"sC")+ce(r.op,"sK")+ce(r.sap||"","sK")+ce(r.descripcion,"sC")+ce(r.cliente,"sC")+ce(r.pedido||0,"sP",true)+ce(esStock(r)?r.total:"","sN",esStock(r))+ce(esStock(r)?0:(r.total||0),"sE",true)+ce(r.total&&!esStock(r)?detalle(r):"","sK")+ce(estadoReg(r),EST_STYLE[estadoReg(r)]||"sK")+'</Row>')});
-  var r2=[filaT("RESUMEN POR OP",10),filaH(["DESPACHO","OP","CLIENTE","DESCRIPCIÓN","PEDIDO","STOCK INICIAL","ENTREGADO (filtro)","ACUMULADO (stock + entregado)","PENDIENTE","EXCEDENTE","ESTADO"])];
-  g.ops.forEach(function(o){var pd=o.pedido-o.acum,ex=o.pedido>0?Math.max(-pd,0):0;r2.push('<Row>'+ce(fcorta(o.fdesp),"sK")+ce(o.op,"sK")+ce(o.cliente,"sC")+ce(o.desc,"sC")+ce(o.pedido,"sP",true)+ce(o.stock||0,"sN",true)+ce(o.ent,"sE",true)+ce(o.acum,"sN",true)+ce(Math.max(pd,0),pd>0?"sP":"sE",true)+ce(ex,ex>0?"sX":"sN",true)+ce(estadoDe(o.op,o.fdesp),EST_STYLE[estadoDe(o.op,o.fdesp)]||"sK")+'</Row>')});
-  var r3=[filaT("RESUMEN POR SAP",6),filaH(["DESPACHO","SAP","DESCRIPCIÓN","CLIENTE","STOCK INICIAL","ENTREGADO","OP"])];
-  g.saps.forEach(function(x){r3.push('<Row>'+ce(fcorta(x.fdesp),"sK")+ce(x.sap||"","sK")+ce(x.desc,"sC")+ce(x.cliente,"sC")+ce(x.stock||0,"sN",true)+ce(x.ent,"sE",true)+ce(Object.keys(x.ops).join(", "),"sC")+'</Row>')});
+// ---- Reporte: la tabla superior solo lleva ingresos reales del habilitador; los resúmenes OP y SAP llevan TODA la lista de pedido (con stock inicial)
+function entregasReales(fl){return fl.filter(function(r){return !esStock(r)&&(r.total||0)>0})}
+function cmpCarga(a,b){if(a.fdesp!==b.fdesp)return a.fdesp<b.fdesp?1:-1;var ha=a.ord<Infinity,hb=b.ord<Infinity;
+  if(ha&&hb)return (a.ord-b.ord)||(a.pos-b.pos);if(ha)return -1;if(hb)return 1;return a.pos-b.pos}
+function agruparReporte(fl){
+  var fds={};fl.forEach(function(r){fds[r.fdesp||r.fecha||""]=1});var fv=$("fDesp").value;if(fv)fds[fv]=1;
+  var base=registros.filter(function(r){return fds[r.fdesp||r.fecha||""]});
+  var pos={};registros.forEach(function(r,i){pos[r.id]=i});
+  var g=agrupar(base),eo={},es={};
+  entregasReales(fl).forEach(function(r){var fd=r.fdesp||"",ko=r.op.toLowerCase()+"|"+fd,ks=fd+"|"+(r.sap||("d:"+r.descripcion));eo[ko]=(eo[ko]||0)+(r.total||0);es[ks]=(es[ks]||0)+(r.total||0)});
+  function meta(recs){var mn=Infinity,mx=-1;recs.forEach(function(r){if(typeof r.ord==="number"&&r.ord>0&&r.ord<mn)mn=r.ord;var p=pos[r.id];if(p>mx)mx=p});return{ord:mn,pos:mx}}
+  g.ops.forEach(function(o){var k=o.op.toLowerCase(),recs=base.filter(function(r){return r.op.toLowerCase()===k&&(r.fdesp||"")===o.fdesp}),m=meta(recs),sp={};
+    recs.forEach(function(r){sp[r.sap||("d:"+r.descripcion)]=1});o.ord=m.ord;o.pos=m.pos;o.nsap=Object.keys(sp).length;o.entF=eo[k+"|"+o.fdesp]||0});
+  g.saps.forEach(function(x){var kk=x.sap||("d:"+x.desc),recs=base.filter(function(r){return (r.fdesp||"")===x.fdesp&&(r.sap||("d:"+r.descripcion))===kk}),m=meta(recs),opsK={},acum=0;
+    recs.forEach(function(r){opsK[r.op.toLowerCase()]=1;acum+=r.total||0});
+    var ped=0,conj=false,inc=false,comp=false;
+    Object.keys(opsK).forEach(function(k){var o=g.ops.find(function(q){return q.op.toLowerCase()===k&&q.fdesp===x.fdesp});if(!o)return;if(o.nsap>1)conj=true;else ped+=o.pedido;
+      var e=estadoDe(o.op,o.fdesp);if(e==="INCOMPLETO")inc=true;if(e==="COMPLETO")comp=true});
+    x.ord=m.ord;x.pos=m.pos;x.entF=es[x.fdesp+"|"+kk]||0;x.acum=acum;x.conj=conj;
+    if(conj){x.pedido=null;x.falt=null;x.exc=null;x.estado=inc?"INCOMPLETO":(comp?"COMPLETO":"")}
+    else{x.pedido=ped;x.falt=Math.max(ped-acum,0);x.exc=ped>0?Math.max(acum-ped,0):0;x.estado=ped>0?(acum>=ped?"COMPLETO":"INCOMPLETO"):""}});
+  g.ops.sort(cmpCarga);g.saps.sort(cmpCarga);return g}
+function xmlEntregas(fl){
+  var g=agruparReporte(fl),ents=entregasReales(fl);
+  var r1=[filaT("ENTREGAS REGISTRADAS POR EL HABILITADOR",11),filaH(["FECHA DESPACHO","FECHA REGISTRO","TURNO","HABILITADOR","OP","SAP","DESCRIPCIÓN","CLIENTE","PEDIDO (OP)","ENTREGADO","DETALLE","ESTADO"])];
+  if(!ents.length)r1.push('<Row>'+ce("Sin entregas registradas","sK",false,11)+'</Row>');
+  ents.forEach(function(r){r1.push('<Row>'+ce(fcorta(r.fdesp||r.fecha),"sK")+ce(fcorta(r.fecha),"sK")+ce(r.turno,"sK")+ce(r.nombre,"sC")+ce(r.op,"sK")+ce(r.sap||"","sK")+ce(r.descripcion,"sC")+ce(r.cliente,"sC")+ce(r.pedido||0,"sP",true)+ce(r.total||0,"sE",true)+ce(detalle(r),"sK")+ce(estadoReg(r),EST_STYLE[estadoReg(r)]||"sK")+'</Row>')});
+  var r2=[filaT("RESUMEN POR OP (lista completa, en el orden de la carga)",10),filaH(["DESPACHO","OP","CLIENTE","DESCRIPCIÓN","PEDIDO","STOCK INICIAL","ENTREGADO (filtro)","ACUMULADO (stock + entregado)","FALTANTE","EXCEDENTE","ESTADO"])];
+  g.ops.forEach(function(o){var pd=o.pedido-o.acum,ex=o.pedido>0?Math.max(-pd,0):0,es=estadoDe(o.op,o.fdesp);
+    r2.push('<Row>'+ce(fcorta(o.fdesp),"sK")+ce(o.op,"sK")+ce(o.cliente,"sC")+ce(o.desc,"sC")+ce(o.pedido,"sP",true)+ce(o.stock||0,"sN",true)+ce(o.entF,"sE",true)+ce(o.acum,"sN",true)+ce(Math.max(pd,0),pd>0?"sP":"sE",true)+ce(ex,ex>0?"sX":"sN",true)+ce(es,EST_STYLE[es]||"sK")+'</Row>')});
+  var r3=[filaT("RESUMEN POR SAP (lista completa, en el orden de la carga)",11),filaH(["DESPACHO","SAP","DESCRIPCIÓN","CLIENTE","PEDIDO","STOCK INICIAL","ENTREGADO (filtro)","ACUMULADO (stock + entregado)","FALTANTE","EXCEDENTE","ESTADO","OP"])];
+  g.saps.forEach(function(x){
+    r3.push('<Row>'+ce(fcorta(x.fdesp),"sK")+ce(x.sap||"","sK")+ce(x.desc,"sC")+ce(x.cliente,"sC")
+      +(x.conj?ce("CONJUNTO OP","sK"):ce(x.pedido,"sP",true))+ce(x.stock||0,"sN",true)+ce(x.entF,"sE",true)+ce(x.acum,"sN",true)
+      +(x.conj?ce("—","sK"):ce(x.falt,x.falt>0?"sP":"sE",true))+(x.conj?ce("—","sK"):ce(x.exc,x.exc>0?"sX":"sN",true))
+      +ce(x.estado||"",EST_STYLE[x.estado]||"sK")+ce(Object.keys(x.ops).join(", "),"sC")+'</Row>')});
   return '<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" xmlns:html="http://www.w3.org/TR/REC-html40">'
-    +ESTILOS+hojaXml("Entregas",[85,85,60,115,85,85,280,160,95,95,85,130,105],r1)+hojaXml("Resumen OP",[85,90,180,260,90,95,120,150,100,100,100],r2)+hojaXml("Resumen SAP",[85,90,300,170,100,100,200],r3)+'</Workbook>'}
+    +ESTILOS+hojaXml("Entregas",[85,85,60,115,85,85,280,160,95,85,130,105],r1)+hojaXml("Resumen OP",[85,90,180,260,90,95,120,150,100,100,100],r2)+hojaXml("Resumen SAP",[85,90,300,170,90,95,120,150,100,100,100,200],r3)+'</Workbook>'}
 function descargar(blob,nombre){var u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=nombre;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},4000);toast("ok","Excel exportado")}
-$("exp").addEventListener("click",function(){var fl=filtrados(),rs=filasReporte(fl);if(!rs.length){toast("error","Nada que exportar");return}avisoExport(fl.length,registros.length);
+$("exp").addEventListener("click",function(){var fl=filtrados();if(!entregasReales(fl).length&&!agruparReporte(fl).ops.length){toast("error","Nada que exportar");return}avisoExport(fl.length,registros.length);
   var nombre="entregas_"+hoy()+".xls",mime="application/vnd.ms-excel";
-  try{var blob=new Blob(["\ufeff",xmlEntregas(rs)],{type:mime});var done=false;
+  try{var blob=new Blob(["\ufeff",xmlEntregas(fl)],{type:mime});var done=false;
     if(navigator.canShare&&window.File){try{var f=new File([blob],nombre,{type:mime});if(navigator.canShare({files:[f]})){navigator.share({files:[f],title:nombre}).then(function(){toast("ok","Excel exportado")}).catch(function(e){if(e&&e.name!=="AbortError")descargar(blob,nombre)});done=true}}catch(e){}}
     if(!done)descargar(blob,nombre)}catch(e){toast("error","No se pudo exportar")}});
 
@@ -865,9 +894,9 @@ function traer(q){if(!cfgSb().url){if(!q)toast("error","Configura la conexión a
     if(q){var locS=registros.filter(function(r){return r.sync}).length,faltan=registros.filter(function(r){return r.sync&&!ids[r.id]}).length;
       if(faltan>0&&(j.records.length===0||(faltan>5&&faltan>locS*0.3)))avisoPurga(faltan,locS);else{var a=registros.length;registros=registros.filter(function(r){return !r.sync||ids[r.id]});n+=a-registros.length}}
     (j.records||[]).forEach(function(x){
-      if(!recRemotoOk(x,pend,"registros")){omit++;return}["pedido","u","c","total"].forEach(function(k){x[k]=num(x[k])});x.sync=true;["id","fecha","fdesp","turno","nombre","op","sap","descripcion","cliente","empaque","estado","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});x.fecha=normFecha(x.fecha);x.fdesp=normFecha(x.fdesp);if(!x.fdesp)x.fdesp=x.fecha;
+      if(!recRemotoOk(x,pend,"registros")){omit++;return}["pedido","u","c","total","ord"].forEach(function(k){x[k]=num(x[k])});x.sync=true;["id","fecha","fdesp","turno","nombre","op","sap","descripcion","cliente","empaque","estado","creado"].forEach(function(k){x[k]=x[k]==null?"":String(x[k]).trim()});x.fecha=normFecha(x.fecha);x.fdesp=normFecha(x.fdesp);if(!x.fdesp)x.fdesp=x.fecha;
       var i=registros.findIndex(function(r){return r.id===x.id});
-      if(i===-1){registros.push(x);n++}else if(registros[i].sync){registros[i]=x}
+      if(i===-1){registros.push(x);n++}else if(registros[i].sync){if(!(x.ord>0)&&registros[i].ord>0)x.ord=registros[i].ord;registros[i]=x}
       if(x.nombre&&nombres.indexOf(x.nombre)===-1){nombres.push(x.nombre)}
     });
     nombres.sort(function(a,b){return a.localeCompare(b,"es",{sensitivity:"base"})});sv(K_NOM,nombres);sv(K_REG,registros);pintarNombres();renderLista();
@@ -876,14 +905,16 @@ $("envSb").addEventListener("click",function(){if(!cfgSb().url){toast("error","C
   var p=pendientes();if(!p.length){toast("ok","Todo está sincronizado");return}enviar(p,true)});
 $("traeSb").addEventListener("click",function(){traer(false)});
 // ---- imprimir
-function resumenHtml(rs){var g=agrupar(rs);
-  var a="<h2>Resumen por OP</h2><table><thead><tr><th>Despacho</th><th>OP</th><th>Cliente</th><th>Descripción</th><th>Pedido</th><th>Stock inicial</th><th>Entregado</th><th>Acum. (stock + entreg.)</th><th>Pendiente</th><th>Excedente</th><th>Estado</th></tr></thead><tbody>"+g.ops.map(function(o){return "<tr><td class='k'>"+fcorta(o.fdesp)+"</td><td class='k'>"+esc(o.op)+"</td><td>"+esc(o.cliente)+"</td><td>"+esc(o.desc)+"</td><td class='n p'>"+o.pedido+"</td><td class='n s'>"+(o.stock||"")+"</td><td class='n e'>"+o.ent+"</td><td class='n'>"+o.acum+"</td><td class='n'>"+Math.max(o.pedido-o.acum,0)+"</td><td class='n"+(o.pedido>0&&o.acum>o.pedido?" x":"")+"'>"+(o.pedido>0?Math.max(o.acum-o.pedido,0):0)+"</td><td class='k s-"+estadoDe(o.op,o.fdesp)+"'>"+estadoDe(o.op,o.fdesp)+"</td></tr>"}).join("")+"</tbody></table>";
-  var b="<h2>Resumen por SAP</h2><table><thead><tr><th>Despacho</th><th>SAP</th><th>Descripción</th><th>Cliente</th><th>Stock inicial</th><th>Entregado</th><th>OP</th></tr></thead><tbody>"+g.saps.map(function(x){return "<tr><td class='k'>"+fcorta(x.fdesp)+"</td><td class='k'>"+esc(x.sap||"")+"</td><td>"+esc(x.desc)+"</td><td>"+esc(x.cliente)+"</td><td class='n s'>"+(x.stock||"")+"</td><td class='n e'>"+x.ent+"</td><td>"+esc(Object.keys(x.ops).join(", "))+"</td></tr>"}).join("")+"</tbody></table>";
+function resumenHtml(g){
+  var a="<h2>Resumen por OP (lista completa, en el orden de la carga)</h2><table><thead><tr><th>Despacho</th><th>OP</th><th>Cliente</th><th>Descripción</th><th>Pedido</th><th>Stock inicial</th><th>Entregado</th><th>Acum. (stock + entreg.)</th><th>Faltante</th><th>Excedente</th><th>Estado</th></tr></thead><tbody>"+g.ops.map(function(o){var pd=o.pedido-o.acum,es=estadoDe(o.op,o.fdesp);
+    return "<tr><td class='k'>"+fcorta(o.fdesp)+"</td><td class='k'>"+esc(o.op)+"</td><td>"+esc(o.cliente)+"</td><td>"+esc(o.desc)+"</td><td class='n p'>"+o.pedido+"</td><td class='n s'>"+(o.stock||"")+"</td><td class='n e'>"+o.entF+"</td><td class='n'>"+o.acum+"</td><td class='n'>"+Math.max(pd,0)+"</td><td class='n"+(o.pedido>0&&pd<0?" x":"")+"'>"+(o.pedido>0?Math.max(-pd,0):0)+"</td><td class='k"+(es?" s-"+es:"")+"'>"+es+"</td></tr>"}).join("")+"</tbody></table>";
+  var b="<h2>Resumen por SAP (lista completa, en el orden de la carga)</h2><table><thead><tr><th>Despacho</th><th>SAP</th><th>Descripción</th><th>Cliente</th><th>Pedido</th><th>Stock inicial</th><th>Entregado</th><th>Acum. (stock + entreg.)</th><th>Faltante</th><th>Excedente</th><th>Estado</th><th>OP</th></tr></thead><tbody>"+g.saps.map(function(x){
+    return "<tr><td class='k'>"+fcorta(x.fdesp)+"</td><td class='k'>"+esc(x.sap||"")+"</td><td>"+esc(x.desc)+"</td><td>"+esc(x.cliente)+"</td><td class='n p'>"+(x.conj?"CONJUNTO OP":x.pedido)+"</td><td class='n s'>"+(x.stock||"")+"</td><td class='n e'>"+x.entF+"</td><td class='n'>"+x.acum+"</td><td class='n'>"+(x.conj?"—":x.falt)+"</td><td class='n"+(!x.conj&&x.exc>0?" x":"")+"'>"+(x.conj?"—":x.exc)+"</td><td class='k"+(x.estado?" s-"+x.estado:"")+"'>"+(x.estado||"")+"</td><td>"+esc(Object.keys(x.ops).join(", "))+"</td></tr>"}).join("")+"</tbody></table>";
   return a+b}
-function imprimir(){var rs=filasReporte(filtrados());if(!rs.length){toast("error","Nada que imprimir");return}
-  var filas=rs.map(function(r){
-    return "<tr><td class='k'>"+fcorta(r.fdesp||r.fecha)+"</td><td class='k'>"+fcorta(r.fecha)+"</td><td class='k'>"+esc(r.turno)+"</td><td>"+esc(r.nombre)+"</td><td class='k'>"+esc(r.op)+"</td><td class='k'>"+esc(r.sap||"")+"</td><td>"+esc(r.descripcion)+"</td><td>"+esc(r.cliente)+"</td><td class='n p'>"+(r.pedido||0)+"</td><td class='n s'>"+(esStock(r)?r.total:"")+"</td><td class='n e'>"+(esStock(r)?0:(r.total||0))+"</td><td class='k'>"+esc(r.total&&!esStock(r)?detalle(r):"")+"</td><td class='k "+(estadoReg(r)?"s-"+estadoReg(r):"")+"'>"+esc(estadoReg(r))+"</td></tr>"}).join("");
-  var html="<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>Control de Entregas</title><style>@page{size:A4 landscape;margin:10mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;font-size:10px;color:#111}h1{font-size:15px;margin:0 0 6px}h2{font-size:12px;margin:14px 0 4px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #888;padding:3px 5px;text-align:left}th{background:#F2A93B;text-align:center}.k{text-align:center}.n{text-align:right;font-weight:700;white-space:nowrap}.e{background:#E6F4EA}.p{background:#FDEBD0}.s{background:#E3F2FD}.x{background:#FADBD8;color:#C0392B}.s-COMPLETO{background:#38A169;color:#fff;font-weight:700}.s-ENPRODUCCION{background:#4299E1;color:#fff;font-weight:700}.s-INCOMPLETO{background:#E53E3E;color:#fff;font-weight:700}</style></head><body><h1>Control de Entregas</h1><table><thead><tr><th>Despacho</th><th>Registro</th><th>Turno</th><th>Habilitador</th><th>OP</th><th>SAP</th><th>Descripción</th><th>Cliente</th><th>Pedido</th><th>Stock inicial</th><th>Entregado</th><th>Detalle</th><th>Estado</th></tr></thead><tbody>"+filas+"</tbody></table>"+resumenHtml(rs)+"</body></html>";
+function imprimir(){var fl=filtrados(),g=agruparReporte(fl),ents=entregasReales(fl);if(!ents.length&&!g.ops.length){toast("error","Nada que imprimir");return}
+  var filas=ents.length?ents.map(function(r){
+    return "<tr><td class='k'>"+fcorta(r.fdesp||r.fecha)+"</td><td class='k'>"+fcorta(r.fecha)+"</td><td class='k'>"+esc(r.turno)+"</td><td>"+esc(r.nombre)+"</td><td class='k'>"+esc(r.op)+"</td><td class='k'>"+esc(r.sap||"")+"</td><td>"+esc(r.descripcion)+"</td><td>"+esc(r.cliente)+"</td><td class='n p'>"+(r.pedido||0)+"</td><td class='n e'>"+(r.total||0)+"</td><td class='k'>"+esc(detalle(r))+"</td><td class='k "+(estadoReg(r)?"s-"+estadoReg(r):"")+"'>"+esc(estadoReg(r))+"</td></tr>"}).join(""):"<tr><td colspan='12' class='k'>Sin entregas registradas</td></tr>";
+  var html="<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'><title>Control de Entregas</title><style>"+"@page{size:A4 landscape;margin:10mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Arial,sans-serif;font-size:10px;color:#111}h1{font-size:15px;margin:0 0 6px}h2{font-size:12px;margin:14px 0 4px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #888;padding:3px 5px;text-align:left}th{background:#F2A93B;text-align:center}.k{text-align:center}.n{text-align:right;font-weight:700;white-space:nowrap}.e{background:#E6F4EA}.p{background:#FDEBD0}.s{background:#E3F2FD}.x{background:#FADBD8;color:#C0392B}.s-COMPLETO{background:#38A169;color:#fff;font-weight:700}.s-ENPRODUCCION{background:#4299E1;color:#fff;font-weight:700}.s-INCOMPLETO{background:#E53E3E;color:#fff;font-weight:700}"+"</style></head><body><h1>Control de Entregas</h1><h2>Entregas registradas por el habilitador</h2><table><thead><tr><th>Despacho</th><th>Registro</th><th>Turno</th><th>Habilitador</th><th>OP</th><th>SAP</th><th>Descripción</th><th>Cliente</th><th>Pedido</th><th>Entregado</th><th>Detalle</th><th>Estado</th></tr></thead><tbody>"+filas+"</tbody></table>"+resumenHtml(g)+"</body></html>";
   var fr=document.createElement("iframe");fr.style.cssText="position:fixed;right:0;bottom:0;width:0;height:0;border:0";document.body.appendChild(fr);
   var d=fr.contentWindow.document;d.open();d.write(html);d.close();
   setTimeout(function(){fr.contentWindow.focus();fr.contentWindow.print();setTimeout(function(){fr.remove()},2000)},300)}
