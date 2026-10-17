@@ -373,11 +373,11 @@ input[type=date]{-webkit-appearance:none;appearance:none}
     <div class="sec">Catálogo de OP</div>
     <p id="catInfo" class="info" style="margin:0 0 10px"></p>
     <div class="tools">
-      <button class="btn-s" id="actCat" type="button">Actualizar desde Sheets</button>
-      <button class="btn-s" id="impCat" type="button">Importar Excel</button>
+      <button class="btn-s" id="actCat" type="button">Actualizar desde Supabase</button>
+      <button class="btn-s" id="impCat" type="button">Importar Excel (solo este equipo)</button>
       <input type="file" id="file" accept=".xlsx,.xls,.csv" class="hidden"/>
     </div>
-    <p class="info" style="margin:0;font-size:.78rem">Hoja principal: OP, Descripción, Cliente, SAP. Hoja de modelos: OP, Modelo, Cantidad, Código SAP. Doble toque en "Actualizar" cambia los links.</p>
+    <p class="info" style="margin:0;font-size:.78rem">El catálogo se lee de la tabla <b>catalogo_op</b> de Supabase (la misma de las otras apps) y se actualiza solo cada 4 horas al abrir la app. Si cargaron OP nuevas, toca «Actualizar». «Importar Excel» solo sirve en este equipo y se reemplaza al actualizar.</p>
   </div>
   <div class="panel">
     <div class="sec">Respaldo de datos</div>
@@ -398,8 +398,7 @@ input[type=date]{-webkit-appearance:none;appearance:none}
 (function(){
 "use strict";
 var $=function(i){return document.getElementById(i)};
-var K_CAT="ctrl_catalogo",K_NOM="ctrl_nombres",K_REG="ctrl_registros",K_URL="ctrl_url_catalogo";
-var DEFAULT_URL="https://docs.google.com/spreadsheets/d/e/2PACX-1vTVxCxG3XBMgSSedTqw7xWb7s7qxbYB3ZavS8MP9bx2lrwkzlK8oNQRSoFLw_sjjY68b1V0vNUaCb7B/pub?gid=0&single=true&output=csv";
+var K_CAT="ctrl_catalogo",K_NOM="ctrl_nombres",K_REG="ctrl_registros";
 var catalogo=[],nombres=[],registros=[];
 var turno="Día",estado="",emp="caja";
 
@@ -423,7 +422,7 @@ function confirmarAvisos(w){w=w.filter(Boolean);if(!w.length)return true;return 
 var _lk=0;function bloqueado(){var n=Date.now();if(n-_lk<1200){toast("error","Ya se está guardando, espera un momento");return true}_lk=n;return false}
 function avisosRegistro(x){var w=[],u=parseInt(x.u,10)||0,c=parseInt(x.c,10)||0,t=u*c,op=x.op;
   w.push(avisoFecha(x.fecha,"registro"),avisoFecha(x.fdesp,"despacho"));avisoCant(u,c).forEach(function(a){w.push(a)});
-  if(!buscar(op))w.push("La OP "+op+" no está en el catálogo de Sheets"+(!x.desc&&!x.cliente?" y se guardará sin descripción ni cliente":""));
+  if(!buscar(op))w.push("La OP "+op+" no está en el catálogo de OP"+(!x.desc&&!x.cliente?" y se guardará sin descripción ni cliente":""));
   else{if(!x.desc)w.push("La descripción está vacía");if(!x.cliente)w.push("El cliente está vacío")}
   var ped=parseInt(x.pedido,10)||0;if(ped>LIM.pedido)w.push("Pedido muy alto ("+ped+")");
   if(ped>0){var ac=acumulado(op,x.fdesp);if(ac+t>ped)w.push("Se excede el pedido en "+(ac+t-ped)+" u (pedido "+ped+", entregado + stock "+ac+")");
@@ -432,7 +431,7 @@ function avisosRegistro(x){var w=[],u=parseInt(x.u,10)||0,c=parseInt(x.c,10)||0,
   return w}
 function avisosIngreso(x){var w=[],u=parseInt(x.u,10)||0,c=parseInt(x.c,10)||0,op=x.op;
   w.push(avisoFecha(x.fecha,"ingreso"));avisoCant(u,c).forEach(function(a){w.push(a)});
-  if(!buscar(op))w.push("La OP "+op+" no está en el catálogo de Sheets"+(!x.desc&&!x.cliente?" y se guardará sin descripción ni cliente":""));
+  if(!buscar(op))w.push("La OP "+op+" no está en el catálogo de OP"+(!x.desc&&!x.cliente?" y se guardará sin descripción ni cliente":""));
   else{if(!x.desc)w.push("La descripción está vacía");if(!x.cliente)w.push("El cliente está vacío")}
   if(ingresos.some(function(r){return String(r.op).toLowerCase()===op.toLowerCase()&&r.fecha===x.fecha&&r.u===u&&r.c===c&&r.total>0&&Date.now()-new Date(r.creado).getTime()<9e5}))w.push("Igual a un ingreso guardado hace menos de 15 min");
   return w}
@@ -642,8 +641,8 @@ function llenarForm(op,sap){var m=op?buscar(op):null;
   else{$("op").value=op||"";$("sap").value=sap||"";$("desc").value=sap?buscarSap(sap):"";opPedidoVista="";sincronizarPedido()}
   pedidoSap();actualizarOpAcum();$("op").scrollIntoView({behavior:"smooth",block:"center"});$("q-u").focus();toast("ok","Datos listos, ingresa unidades y cantidad")}
 document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest("[data-reg]");if(!b)return;llenarForm(b.dataset.op||"",b.dataset.sap||"")});
-function infoOp(op){var m=buscar(op);if(!m)return "<div style='color:var(--red);font-size:.7rem'>No está en la carga de OP de Sheets</div>";return "<div style='color:var(--muted);font-size:.7rem'>"+esc(m.cliente||"")+"</div>"+(m.modelos||[]).map(function(mo){return "<div style='color:var(--muted);font-size:.7rem'>· "+(mo.sap?"SAP "+esc(mo.sap)+" — ":"")+esc(mo.descripcion||"")+"</div>"}).join("")}
-function infoSap(sap){var o=opsDeSap(sap),d=buscarSap(sap);var h=d?"<div style='color:var(--muted);font-size:.7rem'>"+esc(d)+"</div>":"";if(!o.length)return h+"<div style='color:var(--red);font-size:.7rem'>No está en la carga de OP de Sheets</div>";return h+"<div style='color:var(--muted);font-size:.7rem'>OP: "+o.map(function(x){return esc(x.m.op)+(x.m.cliente?" ("+esc(x.m.cliente)+")":"")}).join(", ")+"</div>"}
+function infoOp(op){var m=buscar(op);if(!m)return "<div style='color:var(--red);font-size:.7rem'>No está en el catálogo de OP</div>";return "<div style='color:var(--muted);font-size:.7rem'>"+esc(m.cliente||"")+"</div>"+(m.modelos||[]).map(function(mo){return "<div style='color:var(--muted);font-size:.7rem'>· "+(mo.sap?"SAP "+esc(mo.sap)+" — ":"")+esc(mo.descripcion||"")+"</div>"}).join("")}
+function infoSap(sap){var o=opsDeSap(sap),d=buscarSap(sap);var h=d?"<div style='color:var(--muted);font-size:.7rem'>"+esc(d)+"</div>":"";if(!o.length)return h+"<div style='color:var(--red);font-size:.7rem'>No está en el catálogo de OP</div>";return h+"<div style='color:var(--muted);font-size:.7rem'>OP: "+o.map(function(x){return esc(x.m.op)+(x.m.cliente?" ("+esc(x.m.cliente)+")":"")}).join(", ")+"</div>"}
 function btnReg(op,sap){return "<button type='button' class='btn-s' style='padding:4px 8px;font-size:.72rem' data-reg='1' data-op='"+esc(op||"")+"' data-sap='"+esc(sap||"")+"'>Registrar</button>"}
 function buscarOp(op){var q=String(op).trim().toUpperCase();for(var i=0;i<catalogo.length;i++){if(String(catalogo[i].op||"").trim().toUpperCase()===q){var d=catalogo[i].descripcion||catalogo[i].desc||"";var cl=catalogo[i].cliente||"";return (d+(cl?" \u00b7 "+cl:""))||cl}}
   for(var r=registros.length-1;r>=0;r--){if(String(registros[r].op||"").trim().toUpperCase()===q)return registros[r].descripcion||""}return ""}
@@ -674,7 +673,7 @@ function confirmarLista(fd,rows,tipo){listaConf={fd:fd,rows:rows};var w=$("confL
   var td="padding:6px;border-bottom:1px solid var(--line,#333);vertical-align:top;font-size:.78rem";
   var h=rows.map(function(r,i){var c=elegidos(r,tipo==="OP"?"all":"0")[0];var opCell=r.cands.length>1&&tipo==="SAP"?"<select data-cs='"+i+"'>"+r.cands.map(function(x,j){return "<option value='"+j+"'>"+esc(x.op)+"</option>"}).join("")+"</select>":"<span class='mono'>"+esc(c.op||"—")+"</span>";
     var sapCell=r.cands.length>1&&tipo==="OP"?"<select data-cs='"+i+"'><option value='all'>Todos juntos ("+r.cands.length+")</option><option value='sep'>Separados ("+r.cands.length+" tarjetas)</option>"+r.cands.map(function(x,j){return "<option value='"+j+"'>Solo "+esc(x.sap||x.desc)+"</option>"}).join("")+"</select>":"<span class='mono'>"+esc(c.sap||"—")+"</span>";
-    return "<tr"+(r.ok?"":" style='opacity:.7'")+"><td style='"+td+"'><input type='checkbox' data-ck='"+i+"'"+(r.ok?" checked":"")+"></td><td style='"+td+"'>"+opCell+"</td><td style='"+td+"'>"+sapCell+"</td><td style='"+td+"' data-cl='"+i+"'>"+esc(c.cliente)+"</td><td style='"+td+"' data-de='"+i+"'>"+(r.ok?esc(c.desc):"<span style='color:var(--red)'>"+esc(r.key)+" no está en Sheets</span>")+"</td><td style='"+td+"'><input type='number' data-q='"+i+"' value='"+r.cant+"' style='width:120px'></td><td style='"+td+"'><input type='number' data-s='"+i+"' min='0' placeholder='0' value='"+(r.stock>0?r.stock:"")+"' style='width:120px'></td></tr>"}).join("");
+    return "<tr"+(r.ok?"":" style='opacity:.7'")+"><td style='"+td+"'><input type='checkbox' data-ck='"+i+"'"+(r.ok?" checked":"")+"></td><td style='"+td+"'>"+opCell+"</td><td style='"+td+"'>"+sapCell+"</td><td style='"+td+"' data-cl='"+i+"'>"+esc(c.cliente)+"</td><td style='"+td+"' data-de='"+i+"'>"+(r.ok?esc(c.desc):"<span style='color:var(--red)'>"+esc(r.key)+" no está en el catálogo</span>")+"</td><td style='"+td+"'><input type='number' data-q='"+i+"' value='"+r.cant+"' style='width:120px'></td><td style='"+td+"'><input type='number' data-s='"+i+"' min='0' placeholder='0' value='"+(r.stock>0?r.stock:"")+"' style='width:120px'></td></tr>"}).join("");
   w.innerHTML="<div class='card' style='max-width:900px;width:100%;max-height:90vh;overflow:auto'><div class='sec'>Confirmar despacho "+fcorta(fd)+" · "+rows.length+" fila(s)</div><div style='font-size:.72rem;color:var(--muted);margin-bottom:6px'>Al aceptar se crean las tarjetas con la cantidad pedida y se envían a Sheets. Stock inicial = lo que almacén ya tiene de esa OP: cuenta como cubierto y solo se completa la diferencia. Si tu Excel trae una tercera columna con el stock, ya viene cargado aquí y puedes corregirlo. Luego registras las entregas como siempre.</div><table style='width:100%;border-collapse:collapse'><thead><tr><th></th><th style='text-align:left'>OP</th><th style='text-align:left'>SAP</th><th style='text-align:left'>CLIENTE</th><th style='text-align:left'>DESCRIPCIÓN</th><th style='text-align:left'>PEDIDO</th><th style='text-align:left'>STOCK INICIAL</th></tr></thead><tbody>"+h+"</tbody></table><div style='display:flex;gap:8px;justify-content:flex-end;margin-top:10px'><button class='btn-s' id='confNo'>Cancelar</button><button class='btn-s' id='confSi' style='background:var(--acc,#F2A93B);color:#12161F'>Aceptar y enviar</button></div></div>";
   w.style.display="flex";
   w.querySelectorAll("[data-cs]").forEach(function(sel){sel.addEventListener("change",function(){var i=+sel.dataset.cs,c=elegidos(rows[i],sel.value)[0];if(sel.value==="sep")c={cliente:rows[i].cands[0].cliente,desc:rows[i].cands.map(function(x){return x.desc}).join(" | ")};w.querySelector("[data-cl='"+i+"']").textContent=c.cliente;w.querySelector("[data-de='"+i+"']").textContent=c.desc})});
@@ -687,9 +686,9 @@ function aceptarLista(w){var fd=listaConf.fd,rows=listaConf.rows;
   rows.forEach(function(r,i){if(!w.querySelector("[data-ck='"+i+"']").checked)return;var sel=w.querySelector("[data-cs='"+i+"']"),lst=elegidos(r,sel?sel.value:"0"),c=lst[0];var q=parseInt(w.querySelector("[data-q='"+i+"']").value,10)||0;
     if(!c.op){sinOp++;return}var qraw=w.querySelector("[data-q='"+i+"']").value;if(!esEntero(qraw)||!(q>0)){sinQ++;return}var sraw=w.querySelector("[data-s='"+i+"']").value.trim();if(sraw!==""&&!esEntero(sraw)){sinQ++;return}var stock=sraw===""?0:parseInt(sraw,10);if(stock>LIM.pedido){sinQ++;return}if(stock>0){nS++;sS+=stock}if(stock>q)sMay.push(c.op);if(q>LIM.pedido&&!confirm("La cantidad "+q+" de "+c.op+" es muy alta. ¿Es correcta?")){sinQ++;return}
     lst.forEach(function(c,ci){var ordL=++ordN;if(registros.some(function(x){return x.op.toLowerCase()===c.op.toLowerCase()&&(x.fdesp||"")===fd&&(x.sap||"")===(c.sap||"")})){yaEx++;act.push({op:c.op,q:q,c:c,stock:stock,hasS:sraw!==""&&ci===0,ord:ordL});ops[c.op]=1;return}nuevos.push({id:Date.now()+"-"+Math.random().toString(36).slice(2,6),fecha:$("fecha").value,fdesp:fd,turno:turno,nombre:$("nombre").value,op:c.op,sap:c.sap,descripcion:c.desc,cliente:c.cliente,pedido:q,empaque:emp,u:0,c:0,total:0,estado:"",creado:new Date().toISOString(),sync:false,ord:ordL});if(ci===0&&stock>0){var nr=nuevos[nuevos.length-1];nr.empaque="stock";nr.u=stock;nr.c=1;nr.total=stock}});ops[c.op]=1});
-  if(!nuevos.length&&!act.length){toast("error",sinOp?"Las filas marcadas no tienen OP en Sheets":(sinQ?"Ninguna fila tiene una cantidad entera válida":"No hay filas marcadas"));return}
+  if(!nuevos.length&&!act.length){toast("error",sinOp?"Las filas marcadas no tienen OP en el catálogo":(sinQ?"Ninguna fila tiene una cantidad entera válida":"No hay filas marcadas"));return}
   var avl=[avisoFecha($("fecha").value,"registro"),avisoFecha(fd,"despacho"),sMay.length?"Stock inicial mayor que el pedido en: "+sMay.join(", ")+" (quedarán completas)":""].filter(Boolean);
-  if(!confirm("Se crearán "+nuevos.length+" tarjeta(s) para el "+fcorta(fd)+(yaEx?"\nYa existían "+yaEx+" (solo se actualiza su pedido)":"")+(sinQ?"\n"+sinQ+" fila(s) omitidas por cantidad vacía o inválida":"")+(sinOp?"\n"+sinOp+" fila(s) omitidas sin OP en Sheets":"")+(nS?"\nStock inicial: "+sS+" u en "+nS+" OP":"")+(avl.length?"\n\nAvisos:\n• "+avl.join("\n• "):"")+"\n\n¿Confirmar?"))return;
+  if(!confirm("Se crearán "+nuevos.length+" tarjeta(s) para el "+fcorta(fd)+(yaEx?"\nYa existían "+yaEx+" (solo se actualiza su pedido)":"")+(sinQ?"\n"+sinQ+" fila(s) omitidas por cantidad vacía o inválida":"")+(sinOp?"\n"+sinOp+" fila(s) omitidas sin OP en el catálogo":"")+(nS?"\nStock inicial: "+sS+" u en "+nS+" OP":"")+(avl.length?"\n\nAvisos:\n• "+avl.join("\n• "):"")+"\n\n¿Confirmar?"))return;
   var envio=nuevos.slice();
   act.forEach(function(a){registros.forEach(function(x){if(x.op.toLowerCase()===a.op.toLowerCase()&&(x.fdesp||"")===fd&&x.pedido!==a.q){x.pedido=a.q;x.sync=false;if(envio.indexOf(x)<0)envio.push(x)}})});
   act.forEach(function(a){registros.forEach(function(x){if(x.op.toLowerCase()===a.op.toLowerCase()&&(x.fdesp||"")===fd&&(x.sap||"")===(a.c.sap||"")&&x.ord!==a.ord){x.ord=a.ord;x.sync=false;if(envio.indexOf(x)<0)envio.push(x)}})});
@@ -800,7 +799,7 @@ function renderCfg(){var c=$("nombresLista");c.innerHTML="";
   nombres.forEach(function(n){var d=document.createElement("div");d.className="card";d.style.cssText="display:flex;justify-content:space-between;align-items:center;padding:8px 12px";
     d.innerHTML='<span>'+esc(n)+'</span>';var b=document.createElement("button");b.className="del";b.textContent="Quitar";
     b.addEventListener("click",function(){nombres=nombres.filter(function(x){return x!==n});sv(K_NOM,nombres);pintarNombres();renderCfg()});d.appendChild(b);c.appendChild(d)});
-  $("catInfo").textContent=catalogo.length+" OP en catálogo"}
+  $("catInfo").textContent=catalogo.length+" OP en catálogo"+(catTs()?" · Supabase actualizado "+new Date(catTs()).toLocaleString("es-PE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"")+(catErr?" · ⚠️ "+catErr:"")}
 $("addNombres").addEventListener("click",function(){
   var n=$("nombresTxt").value.split(/[\n,]+/).map(function(x){return x.trim()}).filter(Boolean);
   if(!n.length){toast("error","Escribe al menos un nombre");return}
@@ -809,8 +808,6 @@ $("addNombres").addEventListener("click",function(){
   sv(K_NOM,nombres);$("nombresTxt").value="";pintarNombres();renderCfg();toast("ok",n.length+" nombre(s) procesados")});
 
 // ---- config: catálogo (hoja principal + hoja de modelos)
-var K_URLM="ctrl_url_modelos";
-var DEFAULT_URLM="https://docs.google.com/spreadsheets/d/e/2PACX-1vTVxCxG3XBMgSSedTqw7xWb7s7qxbYB3ZavS8MP9bx2lrwkzlK8oNQRSoFLw_sjjY68b1V0vNUaCb7B/pub?gid=667317961&single=true&output=csv";
 function filasDe(sh){return XLSX.utils.sheet_to_json(sh,{header:1,defval:""})}
 function colOp(h){var i=h.findIndex(function(x){return x==="op"});return i!==-1?i:h.findIndex(function(x){return x.indexOf("op")===0})}
 function colDe(h,t){return h.findIndex(function(x){return x.indexOf(t)!==-1})}
@@ -854,18 +851,42 @@ $("impCat").addEventListener("click",function(){$("file").click()});
 $("file").addEventListener("change",function(e){var f=e.target.files[0];e.target.value="";if(!f)return;if(!archivoOk(f))return;
   var rd=new FileReader();rd.onload=function(ev){try{var wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array"});
     cargarWb(wb.Sheets[wb.SheetNames[0]],wb.SheetNames.length>1?wb.Sheets[wb.SheetNames[1]]:null)}catch(x){toast("error","No se pudo leer el archivo")}};rd.readAsArrayBuffer(f)});
-function txt(u){return fetch(u,{cache:"no-store"}).then(function(r){if(!r.ok)throw 0;return r.text()})}
+// ---- Catálogo de OP desde Supabase (tabla catalogo_op: columnas op y datos jsonb)
+var SB_CAT_URL="https://skoksthbuyrhekfchmug.supabase.co",SB_CAT_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNrb2tzdGhidXlyaGVrZmNobXVnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAyMTEwNjUsImV4cCI6MjEwNTc4NzA2NX0.1vrW7PVIzPvi5a4kIIc-1EoPIYsZcOTeWVq0vXBr5f4",K_CATTS="ctrl_catalogo_ts",CAT_HORAS=4;
+var catErr="";
+function catTs(){return parseInt(localStorage.getItem(K_CATTS)||"0",10)||0}
+function leerCatalogoSb(){var out=[],paginas=0;
+  function pagina(off){return fetch(SB_CAT_URL+"/rest/v1/catalogo_op?select=op,datos&order=op.asc&limit=1000&offset="+off,{headers:{apikey:SB_CAT_KEY,Authorization:"Bearer "+SB_CAT_KEY},cache:"no-store"})
+    .then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error("HTTP "+r.status+" "+t.slice(0,80))});return r.json()})
+    .then(function(rows){if(!Array.isArray(rows))throw new Error("Respuesta inesperada de Supabase");
+      if(!rows.length||++paginas>200)return out;out=out.concat(rows);return pagina(off+rows.length)})}
+  return pagina(0)}
+function nEnt(v){var n=parseInt(String(v==null?"":v).replace(/,/g,""),10);return isNaN(n)?0:n}
+// Una fila de Supabase (op + datos) -> OP del catálogo con la misma forma que usa toda la app
+function normOpSb(row){if(!row)return null;var d=row.datos;if(typeof d==="string"){try{d=JSON.parse(d)}catch(e){d=null}}if(!d||typeof d!=="object")d={};
+  var op=String(row.op!=null&&String(row.op).trim()!==""?row.op:(d.op||"")).trim();if(!op)return null;
+  var mods=(Array.isArray(d.modelos)?d.modelos:[]).map(function(m){m=m||{};var o={descripcion:String(m.descripcion==null?"":m.descripcion).trim(),sap:String(m.sap==null?"":m.sap).trim(),cantidadTotal:m.cantidadTotal==null?"":m.cantidadTotal};if(m.modelo)o.modelo=String(m.modelo).trim();return o});
+  if(!mods.length)mods=[{descripcion:String(d.descripcion||"").trim(),sap:String(d.sap||"").trim(),cantidadTotal:d.cantidadTotal==null?"":d.cantidadTotal}];
+  var q=nEnt(d.cantidadTotal);if(!(q>0))q=mods.reduce(function(a,m){return a+nEnt(m.cantidadTotal)},0);
+  var it={op:op,cliente:String(d.cliente==null?"":d.cliente).trim(),modelos:mods,cantidadTotal:q};
+  if(mods.length>1){it.descripcion="Varios modelos ("+mods.length+")";it.sap="";it.descripcionBase=String(d.descripcionBase||mods[0].descripcion||"").trim()}
+  else{it.descripcion=mods[0].descripcion;it.sap=mods[0].sap;it.descripcionBase=it.descripcion}
+  return it}
+function aplicarCat(nuevoCat,quiet){
+  if(!nuevoCat.length){if(!quiet)toast("error","El catálogo viene vacío");return false}
+  if(catalogo.length>=10&&nuevoCat.length<catalogo.length*0.5){var tx="El catálogo nuevo trae "+nuevoCat.length+" OP y tienes "+catalogo.length+".";
+    if(quiet){toast("error",tx+" No se reemplazó");return false}if(!confirm(tx+"\n¿Reemplazar de todas formas?"))return false}
+  catalogo=nuevoCat;sv(K_CAT,catalogo);return true}
 function actualizarCat(silencioso){
-  var u1=DEFAULT_URL,u2=DEFAULT_URLM;try{u1=localStorage.getItem(K_URL)||DEFAULT_URL;u2=localStorage.getItem(K_URLM)||DEFAULT_URLM}catch(e){}
-  if(u2==="-")u2="";
-  Promise.all([txt(u1),u2?txt(u2):Promise.resolve(null)]).then(function(r){
-    var s1=XLSX.read(r[0],{type:"string"});var s2=null;if(r[1]){var w2=XLSX.read(r[1],{type:"string"});s2=w2.Sheets[w2.SheetNames[0]]}
-    cargarWb(s1.Sheets[s1.SheetNames[0]],s2,silencioso)}).catch(function(){if(!silencioso)toast("error","No se pudo descargar el catálogo")})}
+  if(silencioso&&catalogo.length&&(Date.now()-catTs())<CAT_HORAS*3600*1000)return Promise.resolve();
+  return leerCatalogoSb().then(function(rows){
+    var mp={},ord=[];rows.forEach(function(r){var it=normOpSb(r);if(!it)return;var k=it.op.toLowerCase();if(!(k in mp))ord.push(k);mp[k]=it});
+    var nuevo=ord.map(function(k){return mp[k]});
+    if(!nuevo.length)throw new Error("Supabase devolvió 0 OP (revisa que la tabla catalogo_op permita leer con la clave anon)");
+    if(aplicarCat(nuevo,silencioso)){catErr="";try{localStorage.setItem(K_CATTS,String(Date.now()))}catch(e){}renderCfg();if(!silencioso)toast("ok","Catálogo actualizado: "+catalogo.length+" OP")}
+    else{catErr="no se reemplazó el catálogo local";renderCfg()}
+  }).catch(function(e){catErr=String(e&&e.message||e).slice(0,100);renderCfg();if(!silencioso)toast("error","No se pudo leer el catálogo de Supabase: "+catErr.slice(0,70))})}
 $("actCat").addEventListener("click",function(){actualizarCat(false)});
-$("actCat").addEventListener("dblclick",function(){var a="",b="";try{a=localStorage.getItem(K_URL)||DEFAULT_URL;b=localStorage.getItem(K_URLM)||DEFAULT_URLM}catch(e){}
-  if(b==="-")b="";var u=prompt("Link CSV de la hoja PRINCIPAL:",a);if(u===null)return;
-  var v=prompt("Link CSV de la hoja de MODELOS (vacío si no aplica):",b);if(v===null)v=b;
-  try{localStorage.setItem(K_URL,u.trim()||DEFAULT_URL);localStorage.setItem(K_URLM,v.trim()||"-")}catch(e){}});
 
 // ---- Google Sheets (Apps Script)
 var K_SB="ctrl_sheets_url",K_TOK="ctrl_sheets_token";
@@ -1096,7 +1117,7 @@ function gInfo(i){var r=grid[i],fd=fdActual(),o={err:[],warn:[]};o.vacia=gVacia(
   o.total=(parseInt(r.u,10)||0)*(parseInt(r.c,10)||0);
   var prev=acumulado(op,fd),dup=false;for(var j=0;j<i;j++){var g=grid[j];if(g.op.trim().toLowerCase()===op.toLowerCase()&&op){prev+=(parseInt(g.u,10)||0)*(parseInt(g.c,10)||0);if(g.mod===r.mod)dup=true}}
   o.prev=prev;
-  if(!op)o.err.push("Falta OP");else if(!o.m)o.warn.push("OP no está en Sheets");
+  if(!op)o.err.push("Falta OP");else if(!o.m)o.warn.push("OP no está en el catálogo");
   if(!(o.ped>0))o.err.push("Falta pedido");
   if(!(parseInt(r.u,10)>0))o.err.push("Falta unid.");if(!(parseInt(r.c,10)>0))o.err.push("Falta cant.");
   if(r.u!==""&&!esEntero(r.u))o.err.push("Unid. no entera");if(r.c!==""&&!esEntero(r.c))o.err.push("Cant. no entera");if(r.pedido!==""&&!esEntero(r.pedido))o.err.push("Pedido no entero");
@@ -1196,7 +1217,7 @@ function igModelo(r,m){if(!m)return null;var ms=m.modelos||[];if(!ms.length)retu
   var x=r.mod===""?null:ms[parseInt(r.mod,10)];return x?{sap:x.sap||"",desc:x.descripcion||""}:null}
 function igInfo(i){var r=igrid[i],o={err:[],warn:[]};o.vacia=igVacia(r);if(o.vacia)return o;
   var op=r.op.trim(),u=parseInt(r.u,10)||0,c=parseInt(r.c,10)||0;o.m=buscar(op);o.mo=igModelo(r,o.m);o.total=u*c;
-  if(!op)o.err.push("Falta OP");else if(!o.m)o.warn.push("OP no está en Sheets");
+  if(!op)o.err.push("Falta OP");else if(!o.m)o.warn.push("OP no está en el catálogo");
   if(o.m&&(o.m.modelos||[]).length>1&&r.mod==="")o.err.push("Elige modelo");
   if(!(u>0))o.err.push("Falta unid.");if(!(c>0))o.err.push("Falta cant.");if(r.u!==""&&!esEntero(r.u))o.err.push("Unid. no entera");if(r.c!==""&&!esEntero(r.c))o.err.push("Cant. no entera");avisoCant(u,c).forEach(function(x){o.warn.push(x)});
   var dup=false;for(var j=0;j<i;j++){var g=igrid[j];if(op&&u>0&&g.op.trim().toLowerCase()===op.toLowerCase()&&g.mod===r.mod&&(parseInt(g.u,10)||0)===u&&(parseInt(g.c,10)||0)===c)dup=true}
