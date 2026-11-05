@@ -1,0 +1,8 @@
+{
+  "name": "Control de Entregas",
+  "description": "Control de Entregas y Almacén - Registro de despachos e ingresos con sincronización en tiempo real, catálogo de OPs y exportación a Excel",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
