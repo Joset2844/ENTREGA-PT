@@ -35,6 +35,7 @@ import {
   valStock,
 } from '../services/excel';
 import { ConfirmarListaModal } from './ConfirmarListaModal';
+import { EditarStockModal } from './EditarStockModal';
 import { K_GRID, ld, sv } from '../services/storage';
 
 interface RegistrarTabProps {
@@ -97,12 +98,73 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   const planFileInputRef = useRef<HTMLInputElement>(null);
   const planOpFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Modal confirmation for Excel uploads
   const [confirmModalData, setConfirmModalData] = useState<{
     fd: string;
     tipo: 'OP' | 'SAP';
     rows: ConfirmRow[];
   } | null>(null);
+
+  const [stockEditModal, setStockEditModal] = useState<{
+    op: string;
+    fdesp: string;
+    currentStock: number;
+    pedido?: number;
+  } | null>(null);
+
+  const handleGuardarStockEdit = (newStock: number) => {
+    if (!stockEditModal) return;
+    const { op, fdesp: modalFd, pedido } = stockEditModal;
+    const q = op.toLowerCase();
+
+    let updatedRegs = [...registros];
+    const envio: Registro[] = [];
+
+    const stockRec = updatedRegs.find(
+      (x) => esStock(x) && x.op.toLowerCase() === q && (x.fdesp || '') === modalFd
+    );
+
+    if (stockRec) {
+      stockRec.u = newStock;
+      stockRec.total = newStock;
+      stockRec.c = 1;
+      stockRec.sync = false;
+      envio.push(stockRec);
+    } else if (newStock > 0) {
+      const ref = updatedRegs.find(
+        (x) => x.op.toLowerCase() === q && (x.fdesp || '') === modalFd
+      );
+      const newRec: Registro = {
+        id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+        fecha: ref?.fecha || fecha,
+        fdesp: modalFd,
+        turno: ref?.turno || turno,
+        nombre: ref?.nombre || nombre || 'Almacén',
+        op: ref?.op || op,
+        sap: ref?.sap || '',
+        descripcion: ref?.descripcion || '',
+        cliente: ref?.cliente || '',
+        pedido: ref?.pedido || pedido || 0,
+        empaque: 'stock',
+        u: newStock,
+        c: 1,
+        total: newStock,
+        estado: '',
+        creado: new Date().toISOString(),
+        sync: false,
+      };
+      updatedRegs = [newRec, ...updatedRegs];
+      envio.push(newRec);
+    }
+
+    const camb = recalcularEstados(op, modalFd, updatedRegs, planesOp);
+    camb.forEach((x) => {
+      if (envio.indexOf(x) < 0) envio.push(x);
+    });
+
+    onRegistrosChange(updatedRegs, envio);
+    setStockEditModal(null);
+    onToast('ok', `Stock inicial de ${op} actualizado a ${newStock} u`);
+  };
 
   // Load grid draft on fdesp change
   useEffect(() => {
@@ -1871,6 +1933,24 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                     </div>
                   );
                 })}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+                  <button
+                    className="btn-s"
+                    type="button"
+                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                    onClick={() =>
+                      setStockEditModal({
+                        op: o.op,
+                        fdesp: o.fdesp,
+                        currentStock: o.stock || 0,
+                        pedido: o.pedido,
+                      })
+                    }
+                  >
+                    ✏️ Editar stock inicial ({o.stock || 0} u)
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -1885,6 +1965,17 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
           initialRows={confirmModalData.rows}
           onConfirm={handleConfirmModalAccept}
           onCancel={() => setConfirmModalData(null)}
+        />
+      )}
+
+      {stockEditModal && (
+        <EditarStockModal
+          op={stockEditModal.op}
+          fdesp={stockEditModal.fdesp}
+          currentStock={stockEditModal.currentStock}
+          pedido={stockEditModal.pedido}
+          onSave={handleGuardarStockEdit}
+          onClose={() => setStockEditModal(null)}
         />
       )}
     </div>
