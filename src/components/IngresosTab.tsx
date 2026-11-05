@@ -972,68 +972,85 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
         <span id="iCuenta">{filtrados.length} ingreso(s)</span>
       </div>
 
-      {/* Ingresos List */}
+      {/* Ingresos List Table */}
       <div id="iLista">
         {!filtrados.length ? (
           <div className="empty">Sin ingresos.</div>
         ) : (
-          filtrados.map((r) => {
-            const n =
-              r.empaque === 'caja'
-                ? r.c === 1
-                  ? 'caja'
-                  : 'cajas'
-                : r.c === 1
-                ? 'paquete'
-                : 'paquetes';
+          <div className="table-wrap">
+            <table className="list-table">
+              <thead>
+                <tr>
+                  <th className="k">#</th>
+                  <th>Fecha</th>
+                  <th>Turno</th>
+                  <th>Habilitador</th>
+                  <th>OP</th>
+                  <th>Cliente</th>
+                  <th>SAP / Descripción</th>
+                  <th>Empaque</th>
+                  <th>Detalle</th>
+                  <th className="n">Total</th>
+                  <th className="k">Sync</th>
+                  <th style={{ textAlign: 'right' }}>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtrados.map((r, idx) => {
+                  const n =
+                    r.empaque === 'caja'
+                      ? r.c === 1
+                        ? 'caja'
+                        : 'cajas'
+                      : r.c === 1
+                      ? 'paquete'
+                      : 'paquetes';
 
-            return (
-              <div key={r.id} className="card">
-                <div className="top">
-                  <div>
-                    <span className="op mono">{r.op}</span>{' '}
-                    <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
-                      {r.cliente}
-                    </span>
-                  </div>
-                </div>
-                <div style={{ fontSize: '0.88rem', margin: '4px 0 2px' }}>
-                  {r.descripcion}
-                  {r.sap && (
-                    <span
-                      className="mono"
-                      style={{ fontSize: '0.72rem', color: 'var(--muted)' }}
-                    >
-                      {' '}
-                      SAP {r.sap}
-                    </span>
-                  )}
-                </div>
-                <div className="meta">
-                  {fcorta(r.fecha)} · {r.turno} · {r.nombre}
-                  {r.sync ? ' · ☁️' : ' · ⏳'}
-                </div>
-                <div className="meta">
-                  Ingreso: {r.c} {n} × {r.u} = <strong>{r.total} u</strong>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    marginTop: '8px',
-                    justifyContent: 'flex-end',
-                  }}
-                >
-                  <button
-                    className="del"
-                    type="button"
-                    onClick={() => handleBorrar(r)}
-                  >
-                    Borrar
-                  </button>
-                </div>
-              </div>
-            );
-          })
+                  return (
+                    <tr key={r.id}>
+                      <td className="k" style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
+                        {idx + 1}
+                      </td>
+                      <td className="mono">{fcorta(r.fecha)}</td>
+                      <td>{r.turno}</td>
+                      <td>{r.nombre}</td>
+                      <td>
+                        <span className="op mono">{r.op}</span>
+                      </td>
+                      <td>{r.cliente}</td>
+                      <td>
+                        <div style={{ fontWeight: 500 }}>{r.descripcion}</div>
+                        {r.sap && (
+                          <div className="mono" style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>
+                            SAP {r.sap}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ textTransform: 'capitalize' }}>{r.empaque}</td>
+                      <td style={{ fontSize: '0.82rem', color: 'var(--muted2)' }}>
+                        {r.c} {n} × {r.u}
+                      </td>
+                      <td className="n mono">
+                        <strong>{r.total || 0} u</strong>
+                      </td>
+                      <td className="k" title={r.sync ? 'Sincronizado' : 'Pendiente'}>
+                        {r.sync ? '☁️' : '⏳'}
+                      </td>
+                      <td className="actions">
+                        <button
+                          className="del-btn"
+                          type="button"
+                          onClick={() => handleBorrar(r)}
+                        >
+                          Borrar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

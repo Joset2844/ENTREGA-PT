@@ -406,219 +406,312 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
         <span id="cuenta">{filtrados.length} registro(s)</span>
       </div>
 
-      {/* View 1: ENTRADAS LIST */}
+      {/* View 1: ENTRADAS LIST TABLE */}
       {vista === 'lista' && (
         <div id="lista">
           {!filtrados.length ? (
             <div className="empty">Sin registros.</div>
           ) : (
-            filtrados.map((r) => {
-              const est = estadoReg(r, registros, planesOp);
-              const n =
-                r.empaque === 'caja'
-                  ? r.c === 1
-                    ? 'caja'
-                    : 'cajas'
-                  : r.c === 1
-                  ? 'paquete'
-                  : 'paquetes';
+            <div className="table-wrap">
+              <table className="list-table">
+                <thead>
+                  <tr>
+                    <th className="k">#</th>
+                    <th>Despacho</th>
+                    <th>Registro</th>
+                    <th>Turno</th>
+                    <th>Habilitador</th>
+                    <th>OP</th>
+                    <th>Cliente</th>
+                    <th>SAP / Descripción</th>
+                    <th className="n">Pedido</th>
+                    <th className="n">Entregado / Stock</th>
+                    <th>Detalle</th>
+                    <th className="k">Estado</th>
+                    <th className="k">Sync</th>
+                    <th style={{ textAlign: 'right' }}>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtrados.map((r, idx) => {
+                    const est = estadoReg(r, registros, planesOp);
+                    const n =
+                      r.empaque === 'caja'
+                        ? r.c === 1
+                          ? 'caja'
+                          : 'cajas'
+                        : r.c === 1
+                        ? 'paquete'
+                        : 'paquetes';
+                    const isStk = esStock(r);
 
-              return (
-                <div key={r.id} className="card">
-                  <div className="top">
-                    <div>
-                      <span className="op mono">{r.op}</span>{' '}
-                      <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
-                        {r.cliente}
-                      </span>
-                    </div>
-                    {est && <span className={`badge b-${est}`}>{est}</span>}
-                  </div>
-                  <div style={{ fontSize: '0.88rem', margin: '4px 0 2px' }}>
-                    {r.descripcion}
-                    {r.sap && (
-                      <span
-                        className="mono"
-                        style={{ fontSize: '0.72rem', color: 'var(--muted)' }}
-                      >
-                        {' '}
-                        SAP {r.sap}
-                      </span>
-                    )}
-                  </div>
-                  <div className="meta">
-                    Despacho <strong>{fcorta(r.fdesp || r.fecha)}</strong> · Registro{' '}
-                    {fcorta(r.fecha)} · {r.turno} · {r.nombre}
-                    {r.sync ? ' · ☁️' : ' · ⏳'}
-                  </div>
-                  <div className="meta">
-                    Pedido: <strong>{r.pedido || 0} u</strong>
-                  </div>
-                  {esStock(r) ? (
-                    <div className="meta">
-                      Stock inicial en almacén: <strong>{r.total} u</strong>
-                    </div>
-                  ) : (
-                    <div className="meta">
-                      Entregado:{' '}
-                      {r.total ? (
-                        <>
-                          {r.c} {n} × {r.u} = <strong>{r.total} u</strong>
-                        </>
-                      ) : (
-                        <strong>0 u</strong>
-                      )}
-                    </div>
-                  )}
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: '8px',
-                      marginTop: '8px',
-                      alignItems: 'center',
-                      justifyContent: 'flex-end',
-                    }}
-                  >
-                    {esStock(r) && (
-                      <button
-                        className="btn-s"
-                        type="button"
-                        style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                        onClick={() =>
-                          setStockEditModal({
-                            op: r.op,
-                            fdesp: r.fdesp || r.fecha,
-                            currentStock: r.total || 0,
-                            pedido: r.pedido,
-                          })
-                        }
-                      >
-                        ✏️ Editar stock
-                      </button>
-                    )}
-                    <button
-                      className="del"
-                      type="button"
-                      onClick={() => handleBorrar(r)}
-                    >
-                      Borrar
-                    </button>
-                  </div>
-                </div>
-              );
-            })
+                    return (
+                      <tr key={r.id}>
+                        <td className="k" style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
+                          {idx + 1}
+                        </td>
+                        <td className="mono">{fcorta(r.fdesp || r.fecha)}</td>
+                        <td className="mono">{fcorta(r.fecha)}</td>
+                        <td>{r.turno}</td>
+                        <td>{r.nombre}</td>
+                        <td>
+                          <span className="op mono">{r.op}</span>
+                        </td>
+                        <td>{r.cliente}</td>
+                        <td>
+                          <div style={{ fontWeight: 500 }}>{r.descripcion}</div>
+                          {r.sap && (
+                            <div className="mono" style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>
+                              SAP {r.sap}
+                            </div>
+                          )}
+                        </td>
+                        <td className="n mono">{r.pedido || 0} u</td>
+                        <td className="n mono">
+                          {isStk ? (
+                            <span className="badge-stock">Stock {r.total} u</span>
+                          ) : (
+                            <strong>{r.total || 0} u</strong>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '0.82rem', color: 'var(--muted2)' }}>
+                          {isStk ? (
+                            <span style={{ color: 'var(--muted)' }}>Stock inicial</span>
+                          ) : r.total ? (
+                            `${r.c} ${n} × ${r.u}`
+                          ) : (
+                            '0'
+                          )}
+                        </td>
+                        <td className="k">
+                          {est && <span className={`badge b-${est}`}>{est}</span>}
+                        </td>
+                        <td className="k" title={r.sync ? 'Sincronizado' : 'Pendiente'}>
+                          {r.sync ? '☁️' : '⏳'}
+                        </td>
+                        <td className="actions">
+                          {isStk && (
+                            <button
+                              className="stock-btn"
+                              type="button"
+                              title="Editar stock inicial"
+                              onClick={() =>
+                                setStockEditModal({
+                                  op: r.op,
+                                  fdesp: r.fdesp || r.fecha,
+                                  currentStock: r.total || 0,
+                                  pedido: r.pedido,
+                                })
+                              }
+                            >
+                              ✏️ Stock
+                            </button>
+                          )}
+                          <button
+                            className="del-btn"
+                            type="button"
+                            onClick={() => handleBorrar(r)}
+                          >
+                            Borrar
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
 
-      {/* View 2: RESUMEN POR OP / SAP */}
+      {/* View 2: RESUMEN POR OP / SAP TABLES */}
       {vista === 'resumen' && (
         <div id="lista">
           {!filtrados.length ? (
             <div className="empty">Sin registros.</div>
           ) : (
             <>
-              <div className="sec" style={{ gridColumn: '1 / -1' }}>
-                Por OP y despacho — {gSummary.ops.length} · {totEntregadasSummary} u entregadas
-              </div>
-              {gSummary.ops.map((o) => {
-                const pd = o.pedido - o.acum;
-                const ok = o.pedido > 0 && pd <= 0;
-                return (
-                  <div key={o.op + '|' + o.fdesp} className="card">
-                    <div className="top">
-                      <div>
-                        <span className="op mono">{o.op}</span>{' '}
-                        <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
-                          {o.cliente}
-                        </span>
-                      </div>
-                      {o.pedido > 0 && (
-                        <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
-                          {ok
-                            ? `COMPLETO${pd < 0 ? ` (excede ${-pd})` : ''}`
-                            : `INCOMPLETO · faltan ${pd}`}
-                        </span>
-                      )}
-                    </div>
-                    <div className="meta">
-                      Despacho: <strong>{fcorta(o.fdesp)}</strong> · Pedido:{' '}
-                      <strong>{o.pedido} u</strong>
-                      {o.stock > 0 && (
-                        <>
-                          {' '}
-                          · Stock inicial: <strong>{o.stock} u</strong>
-                        </>
-                      )}
-                    </div>
-                    <div className="meta">
-                      Entregado en esta vista: <strong>{o.ent} u</strong> · Acumulado del despacho
-                      {o.stock > 0 ? ' (con stock)' : ''}: <strong>{o.acum} u</strong> ·
-                      Pendiente: <strong>{Math.max(pd, 0)} u</strong>
-                      {pd < 0 && o.pedido > 0 && (
-                        <>
-                          {' '}
-                          · Excedente:{' '}
-                          <strong style={{ color: 'var(--red)' }}>{-pd} u</strong>
-                        </>
-                      )}
-                    </div>
-                    {Object.keys(o.lineas).map((k) => {
-                      const L = o.lineas[k];
-                      return (
-                        <div key={k} className="meta">
-                          · {L.sap ? <>SAP <span className="mono">{L.sap}</span> — </> : ''}
-                          {L.desc}: <strong>{L.ent} u</strong>
-                        </div>
-                      );
-                    })}
-
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
-                      <button
-                        className="btn-s"
-                        type="button"
-                        style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                        onClick={() =>
-                          setStockEditModal({
-                            op: o.op,
-                            fdesp: o.fdesp,
-                            currentStock: o.stock || 0,
-                            pedido: o.pedido,
-                          })
-                        }
-                      >
-                        ✏️ Editar stock inicial ({o.stock || 0} u)
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-
-              <div className="sec" style={{ gridColumn: '1 / -1', marginTop: '12px' }}>
-                Por SAP y despacho (suma de las OP del mismo despacho)
-              </div>
-              {gSummary.saps.map((x) => (
-                <div key={x.fdesp + '|' + x.sap} className="card">
-                  <div className="top">
-                    <div>
-                      <span className="op mono">SAP {x.sap || '—'}</span>
-                    </div>
-                    <span className="badge">{x.ent} u</span>
-                  </div>
-                  <div style={{ fontSize: '0.88rem', margin: '4px 0 2px' }}>{x.desc}</div>
-                  <div className="meta">
-                    Despacho: <strong>{fcorta(x.fdesp)}</strong> · OP:{' '}
-                    {Object.keys(x.ops).join(', ')}
-                    {x.stock > 0 && (
-                      <>
-                        {' '}
-                        · Stock inicial: <strong>{x.stock} u</strong>
-                      </>
-                    )}
-                  </div>
+              {/* Table 1: Resumen por OP */}
+              <div className="panel" style={{ padding: '14px', marginBottom: '8px' }}>
+                <div
+                  className="sec"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '8px',
+                    marginBottom: '12px',
+                  }}
+                >
+                  <span>Resumen por OP y Despacho ({gSummary.ops.length} OPs)</span>
+                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--amber-ink)' }}>
+                    Total entregado: {totEntregadasSummary} u
+                  </span>
                 </div>
-              ))}
+
+                <div className="table-wrap">
+                  <table className="list-table">
+                    <thead>
+                      <tr>
+                        <th>Despacho</th>
+                        <th>OP</th>
+                        <th>Cliente</th>
+                        <th>Detalle / Líneas</th>
+                        <th className="n">Pedido</th>
+                        <th className="n">Stock inicial</th>
+                        <th className="n">Entregado</th>
+                        <th className="n">Acumulado</th>
+                        <th className="n">Pendiente</th>
+                        <th className="n">Excedente</th>
+                        <th className="k">Estado</th>
+                        <th style={{ textAlign: 'right' }}>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gSummary.ops.map((o) => {
+                        const pd = o.pedido - o.acum;
+                        const ok = o.pedido > 0 && pd <= 0;
+                        return (
+                          <tr key={o.op + '|' + o.fdesp}>
+                            <td className="mono">{fcorta(o.fdesp)}</td>
+                            <td>
+                              <span className="op mono">{o.op}</span>
+                            </td>
+                            <td>{o.cliente}</td>
+                            <td style={{ fontSize: '0.82rem' }}>
+                              {Object.keys(o.lineas).length > 0 ? (
+                                Object.keys(o.lineas).map((k) => {
+                                  const L = o.lineas[k];
+                                  return (
+                                    <div key={k} style={{ marginBottom: '2px' }}>
+                                      {L.sap && (
+                                        <span className="mono" style={{ color: 'var(--muted)' }}>
+                                          SAP {L.sap} ·{' '}
+                                        </span>
+                                      )}
+                                      {L.desc}: <strong>{L.ent} u</strong>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <span style={{ color: 'var(--muted)' }}>—</span>
+                              )}
+                            </td>
+                            <td className="n mono">{o.pedido || 0}</td>
+                            <td className="n mono">{o.stock > 0 ? `${o.stock} u` : '—'}</td>
+                            <td className="n mono">
+                              <strong>{o.ent} u</strong>
+                            </td>
+                            <td className="n mono">
+                              <strong>{o.acum} u</strong>
+                            </td>
+                            <td className="n mono">
+                              {Math.max(pd, 0) > 0 ? `${Math.max(pd, 0)} u` : '0'}
+                            </td>
+                            <td className="n mono">
+                              {pd < 0 && o.pedido > 0 ? (
+                                <span style={{ color: 'var(--red)', fontWeight: 700 }}>
+                                  {-pd} u
+                                </span>
+                              ) : (
+                                '0'
+                              )}
+                            </td>
+                            <td className="k">
+                              {o.pedido > 0 && (
+                                <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
+                                  {ok
+                                    ? pd < 0
+                                      ? `COMPLETO (+${-pd})`
+                                      : 'COMPLETO'
+                                    : `Faltan ${pd}`}
+                                </span>
+                              )}
+                            </td>
+                            <td className="actions">
+                              <button
+                                className="stock-btn"
+                                type="button"
+                                onClick={() =>
+                                  setStockEditModal({
+                                    op: o.op,
+                                    fdesp: o.fdesp,
+                                    currentStock: o.stock || 0,
+                                    pedido: o.pedido,
+                                  })
+                                }
+                              >
+                                ✏️ Stock ({o.stock || 0})
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Table 2: Resumen por SAP */}
+              <div className="panel" style={{ padding: '14px', marginBottom: '8px' }}>
+                <div className="sec" style={{ marginBottom: '12px' }}>
+                  Resumen por SAP y Despacho ({gSummary.saps.length} códigos SAP — suma de OPs del mismo despacho)
+                </div>
+
+                <div className="table-wrap">
+                  <table className="list-table">
+                    <thead>
+                      <tr>
+                        <th>Despacho</th>
+                        <th>SAP</th>
+                        <th>Descripción</th>
+                        <th>OPs agrupadas</th>
+                        <th className="n">Stock inicial</th>
+                        <th className="n">Entregado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gSummary.saps.map((x) => (
+                        <tr key={x.fdesp + '|' + x.sap}>
+                          <td className="mono">{fcorta(x.fdesp)}</td>
+                          <td>
+                            <span
+                              className="mono"
+                              style={{
+                                fontWeight: 700,
+                                background: 'var(--alt)',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                              }}
+                            >
+                              {x.sap || '—'}
+                            </span>
+                          </td>
+                          <td>{x.desc}</td>
+                          <td className="mono" style={{ fontSize: '0.82rem' }}>
+                            {Object.keys(x.ops).join(', ')}
+                          </td>
+                          <td className="n mono">{x.stock > 0 ? `${x.stock} u` : '—'}</td>
+                          <td className="n mono">
+                            <span
+                              className="badge"
+                              style={{
+                                fontSize: '0.8rem',
+                                background: 'var(--amber)',
+                                color: 'var(--on-amber)',
+                              }}
+                            >
+                              {x.ent} u
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </>
           )}
         </div>

@@ -1874,86 +1874,125 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
         </div>
       )}
 
-      {/* Grouped summary cards of current despacho */}
+      {/* Grouped summary list table of current despacho */}
       {groupedSub.ops.length > 0 && (
-        <div id="despachoRes">
-          <div className="sec" style={{ marginTop: '6px' }}>
-            Despacho {fcorta(fdesp)} por OP
+        <div id="despachoRes" className="panel" style={{ padding: '16px', marginTop: '12px' }}>
+          <div
+            className="sec"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '8px',
+              marginBottom: '12px',
+            }}
+          >
+            <span>Resumen del Despacho {fcorta(fdesp)} por OP ({groupedSub.ops.length} OPs)</span>
+            <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--amber-ink)' }}>
+              Entregado: {totEntregado} u{totStock ? ` · Stock inicial: ${totStock} u` : ''}
+            </span>
           </div>
-          {groupedSub.ops.map((o) => {
-            const pd = o.pedido - o.acum;
-            const ok = o.pedido > 0 && pd <= 0;
-            return (
-              <div key={o.op} className="card">
-                <div className="top">
-                  <div>
-                    <span className="op mono">{o.op}</span>{' '}
-                    <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
-                      {o.cliente}
-                    </span>
-                  </div>
-                  {o.pedido > 0 && (
-                    <span
-                      className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}
-                    >
-                      {ok
-                        ? `COMPLETO${pd < 0 ? ` (excede ${-pd})` : ''}`
-                        : `INCOMPLETO · faltan ${pd}`}
-                    </span>
-                  )}
-                </div>
-                <div className="meta">
-                  Despacho: <strong>{fcorta(o.fdesp)}</strong> · Pedido:{' '}
-                  <strong>{o.pedido} u</strong>
-                  {o.stock > 0 && (
-                    <>
-                      {' '}
-                      · Stock inicial: <strong>{o.stock} u</strong>
-                    </>
-                  )}
-                </div>
-                <div className="meta">
-                  Entregado en esta vista: <strong>{o.ent} u</strong> · Acumulado del despacho
-                  {o.stock > 0 ? ' (con stock)' : ''}: <strong>{o.acum} u</strong> ·
-                  Pendiente: <strong>{Math.max(pd, 0)} u</strong>
-                  {pd < 0 && o.pedido > 0 && (
-                    <>
-                      {' '}
-                      · Excedente:{' '}
-                      <strong style={{ color: 'var(--red)' }}>{-pd} u</strong>
-                    </>
-                  )}
-                </div>
-                {Object.keys(o.lineas).map((k) => {
-                  const L = o.lineas[k];
+
+          <div className="table-wrap">
+            <table className="list-table">
+              <thead>
+                <tr>
+                  <th>OP</th>
+                  <th>Cliente</th>
+                  <th>Detalle / Líneas</th>
+                  <th className="n">Pedido</th>
+                  <th className="n">Stock inicial</th>
+                  <th className="n">Entregado</th>
+                  <th className="n">Acumulado</th>
+                  <th className="n">Pendiente</th>
+                  <th className="n">Excedente</th>
+                  <th className="k">Estado</th>
+                  <th style={{ textAlign: 'right' }}>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groupedSub.ops.map((o) => {
+                  const pd = o.pedido - o.acum;
+                  const ok = o.pedido > 0 && pd <= 0;
                   return (
-                    <div key={k} className="meta">
-                      · {L.sap ? <>SAP <span className="mono">{L.sap}</span> — </> : ''}
-                      {L.desc}: <strong>{L.ent} u</strong>
-                    </div>
+                    <tr key={o.op}>
+                      <td>
+                        <span className="op mono">{o.op}</span>
+                      </td>
+                      <td>{o.cliente}</td>
+                      <td style={{ fontSize: '0.82rem' }}>
+                        {Object.keys(o.lineas).length > 0 ? (
+                          Object.keys(o.lineas).map((k) => {
+                            const L = o.lineas[k];
+                            return (
+                              <div key={k} style={{ marginBottom: '2px' }}>
+                                {L.sap && (
+                                  <span className="mono" style={{ color: 'var(--muted)' }}>
+                                    SAP {L.sap} ·{' '}
+                                  </span>
+                                )}
+                                {L.desc}: <strong>{L.ent} u</strong>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <span style={{ color: 'var(--muted)' }}>—</span>
+                        )}
+                      </td>
+                      <td className="n mono">{o.pedido || 0}</td>
+                      <td className="n mono">{o.stock > 0 ? `${o.stock} u` : '—'}</td>
+                      <td className="n mono">
+                        <strong>{o.ent} u</strong>
+                      </td>
+                      <td className="n mono">
+                        <strong>{o.acum} u</strong>
+                      </td>
+                      <td className="n mono">
+                        {Math.max(pd, 0) > 0 ? `${Math.max(pd, 0)} u` : '0'}
+                      </td>
+                      <td className="n mono">
+                        {pd < 0 && o.pedido > 0 ? (
+                          <span style={{ color: 'var(--red)', fontWeight: 700 }}>
+                            {-pd} u
+                          </span>
+                        ) : (
+                          '0'
+                        )}
+                      </td>
+                      <td className="k">
+                        {o.pedido > 0 && (
+                          <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
+                            {ok
+                              ? pd < 0
+                                ? `COMPLETO (+${-pd})`
+                                : 'COMPLETO'
+                              : `Faltan ${pd}`}
+                          </span>
+                        )}
+                      </td>
+                      <td className="actions">
+                        <button
+                          className="stock-btn"
+                          type="button"
+                          onClick={() =>
+                            setStockEditModal({
+                              op: o.op,
+                              fdesp: o.fdesp,
+                              currentStock: o.stock || 0,
+                              pedido: o.pedido,
+                            })
+                          }
+                        >
+                          ✏️ Stock ({o.stock || 0})
+                        </button>
+                      </td>
+                    </tr>
                   );
                 })}
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
-                  <button
-                    className="btn-s"
-                    type="button"
-                    style={{ padding: '4px 10px', fontSize: '0.78rem' }}
-                    onClick={() =>
-                      setStockEditModal({
-                        op: o.op,
-                        fdesp: o.fdesp,
-                        currentStock: o.stock || 0,
-                        pedido: o.pedido,
-                      })
-                    }
-                  >
-                    ✏️ Editar stock inicial ({o.stock || 0} u)
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

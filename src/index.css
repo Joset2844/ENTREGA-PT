@@ -665,31 +665,130 @@ input[type="date"] {
   background: var(--red);
 }
 
-/* Lists */
+/* Lists & List Tables */
 #lista,
 #iLista,
 #despachoRes {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
-  gap: 12px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
 }
 
-#lista .card,
-#iLista .card,
-#despachoRes .card {
-  margin: 0;
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--panel);
+  box-shadow: var(--shadow);
 }
 
-#lista .empty,
-#iLista .empty,
-#despachoRes > .sec {
-  grid-column: 1 / -1;
+.list-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.85rem;
 }
 
-#despachoRes {
-  margin-top: 6px;
+.list-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--alt);
+  color: var(--muted2);
+  font-weight: 700;
+  text-align: left;
+  padding: 10px 10px;
+  border-bottom: 2px solid var(--inp);
+  white-space: nowrap;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
 }
+
+.list-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  font-size: 0.86rem;
+  background: var(--panel);
+}
+
+.list-table tbody tr:nth-child(even) td {
+  background: rgba(0, 0, 0, 0.018);
+}
+
+@media (prefers-color-scheme: dark) {
+  .list-table tbody tr:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.02);
+  }
+}
+
+.list-table tbody tr:hover td {
+  background: rgba(245, 165, 36, 0.1);
+}
+
+.list-table th.n,
+.list-table td.n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.list-table th.k,
+.list-table td.k {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.list-table td.actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.list-table .del-btn {
+  background: none;
+  border: none;
+  color: var(--red);
+  cursor: pointer;
+  font: 600 0.82rem 'Figtree', sans-serif;
+  padding: 5px 9px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.list-table .del-btn:hover {
+  background: rgba(210, 59, 59, 0.12);
+}
+
+.list-table .stock-btn {
+  background: var(--field);
+  color: var(--text);
+  border: 1px solid var(--inp);
+  cursor: pointer;
+  font: 600 0.78rem 'Figtree', sans-serif;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  margin-right: 6px;
+}
+
+.list-table .stock-btn:hover {
+  background: var(--alt);
+  border-color: var(--amber);
+}
+
+.badge-stock {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--op-bg);
+  color: var(--op-tx);
+  border: 1px solid var(--inp);
+}
+
 
 /* Filters */
 #t-lista > .panel,
