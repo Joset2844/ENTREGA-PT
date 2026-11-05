@@ -22,6 +22,7 @@ import {
   pedidoPlanOp,
   pedidoPlanSap,
   recalcularEstados,
+  sanitizarStockDuplicados,
   stockDe,
   ultimoPedido,
   agrupar,
@@ -34,6 +35,7 @@ import {
   buscarSap,
   valStock,
 } from '../services/excel';
+import { encolarDel } from '../services/sheets';
 import { ConfirmarListaModal } from './ConfirmarListaModal';
 import { EditarStockModal } from './EditarStockModal';
 import { K_GRID, ld, sv } from '../services/storage';
@@ -114,24 +116,40 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   const handleGuardarStockEdit = (newStock: number) => {
     if (!stockEditModal) return;
     const { op, fdesp: modalFd, pedido } = stockEditModal;
-    const q = op.toLowerCase();
+    const q = op.trim().toLowerCase();
 
     let updatedRegs = [...registros];
     const envio: Registro[] = [];
 
-    const stockRec = updatedRegs.find(
-      (x) => esStock(x) && x.op.toLowerCase() === q && (x.fdesp || '') === modalFd
+    // Find all stock records for this OP and dispatch
+    const stockRecs = updatedRegs.filter(
+      (x) => esStock(x) && x.op.trim().toLowerCase() === q && (x.fdesp || x.fecha || '') === modalFd
     );
 
-    if (stockRec) {
-      stockRec.u = newStock;
-      stockRec.total = newStock;
-      stockRec.c = 1;
-      stockRec.sync = false;
-      envio.push(stockRec);
+    if (stockRecs.length > 0) {
+      if (newStock > 0) {
+        // Update first stock record
+        const prim = stockRecs[0];
+        prim.u = newStock;
+        prim.total = newStock;
+        prim.c = 1;
+        prim.sync = false;
+        envio.push(prim);
+      } else {
+        // newStock is 0: remove all stock records for this OP in this despacho
+        updatedRegs = updatedRegs.filter((x) => !stockRecs.some((s) => s.id === x.id));
+        stockRecs.forEach((s) => encolarDel(s.id, 'registros'));
+      }
+
+      // If duplicate stock records were present, delete them permanently
+      if (stockRecs.length > 1) {
+        const dups = stockRecs.slice(1);
+        updatedRegs = updatedRegs.filter((x) => !dups.some((d) => d.id === x.id));
+        dups.forEach((d) => encolarDel(d.id, 'registros'));
+      }
     } else if (newStock > 0) {
       const ref = updatedRegs.find(
-        (x) => x.op.toLowerCase() === q && (x.fdesp || '') === modalFd
+        (x) => x.op.trim().toLowerCase() === q && (x.fdesp || x.fecha || '') === modalFd
       );
       const newRec: Registro = {
         id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
@@ -156,6 +174,11 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       envio.push(newRec);
     }
 
+    // Safety sanitizer
+    const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(updatedRegs);
+    duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
+    updatedRegs = registrosLimpios;
+
     const camb = recalcularEstados(op, modalFd, updatedRegs, planesOp);
     camb.forEach((x) => {
       if (envio.indexOf(x) < 0) envio.push(x);
@@ -163,7 +186,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
 
     onRegistrosChange(updatedRegs, envio);
     setStockEditModal(null);
-    onToast('ok', `Stock inicial de ${op} actualizado a ${newStock} u`);
+    onToast('ok', `Stock inicial de ${op} establecido en ${newStock} u`);
   };
 
   // Load grid draft on fdesp change
@@ -665,45 +688,51 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     }
 
     const nuevos: Registro[] = [];
+    const envio: Registro[] = [];
     const ops: Record<string, number> = {};
-    let yaEx = 0;
-    const act: any[] = [];
-    let nS = 0;
-    let sS = 0;
-    const sMay: string[] = [];
     let ordN = 0;
+    let yaEx = 0;
 
+    // Track initial stock strictly ONCE per OP for this dispatch
+    const opStockMap: Record<
+      string,
+      { stock: number; candidate: Candidate; q: number; ord: number }
+    > = {};
+
+    let workingRegs = [...registros];
+
+    // 1. Process rows & candidates
     processed.selectedRows.forEach((r) => {
       const q = r.pedido;
       const stock = r.stock;
-      if (stock > 0) {
-        nS++;
-        sS += stock;
-      }
-      if (stock > q) {
-        sMay.push(r.candidates[0]?.op || '');
+      const firstCand = r.candidates[0];
+      if (firstCand && stock > 0) {
+        const opKey = firstCand.op.trim().toLowerCase();
+        if (!opStockMap[opKey] || stock > opStockMap[opKey].stock) {
+          opStockMap[opKey] = { stock, candidate: firstCand, q, ord: ordN + 1 };
+        }
       }
 
-      r.candidates.forEach((c, ci) => {
+      r.candidates.forEach((c) => {
         const ordL = ++ordN;
-        const exists = registros.some(
+        ops[c.op] = q;
+
+        const exists = workingRegs.find(
           (x) =>
             x.op.toLowerCase() === c.op.toLowerCase() &&
             (x.fdesp || '') === fdesp &&
-            (x.sap || '') === (c.sap || '')
+            (x.sap || '') === (c.sap || '') &&
+            !esStock(x)
         );
 
         if (exists) {
           yaEx++;
-          act.push({
-            op: c.op,
-            q,
-            c,
-            stock,
-            hasS: stock > 0 && ci === 0,
-            ord: ordL,
-          });
-          ops[c.op] = 1;
+          if (exists.pedido !== q || exists.ord !== ordL) {
+            exists.pedido = q;
+            exists.ord = ordL;
+            exists.sync = false;
+            if (envio.indexOf(exists) < 0) envio.push(exists);
+          }
           return;
         }
 
@@ -728,120 +757,106 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
           ord: ordL,
         };
 
-        if (ci === 0 && stock > 0) {
-          newRec.empaque = 'stock';
-          newRec.u = stock;
-          newRec.c = 1;
-          newRec.total = stock;
-        }
-
         nuevos.push(newRec);
-        ops[c.op] = 1;
+        envio.push(newRec);
       });
     });
 
-    const envio: Registro[] = [...nuevos];
+    // 2. Handle initial stock strictly ONCE per OP (no duplicates allowed)
+    Object.keys(opStockMap).forEach((opKey) => {
+      const { stock, candidate, q, ord } = opStockMap[opKey];
+      // Search for any existing stock record for this OP in this despacho
+      const existingStockRecs = workingRegs.filter(
+        (x) => esStock(x) && x.op.trim().toLowerCase() === opKey && (x.fdesp || '') === fdesp
+      );
 
-    act.forEach((a) => {
-      registros.forEach((x) => {
-        if (
-          x.op.toLowerCase() === a.op.toLowerCase() &&
-          (x.fdesp || '') === fdesp &&
-          x.pedido !== a.q
-        ) {
-          x.pedido = a.q;
-          x.sync = false;
-          if (envio.indexOf(x) < 0) envio.push(x);
+      if (existingStockRecs.length > 0) {
+        // Update the primary stock record
+        const prim = existingStockRecs[0];
+        prim.u = stock;
+        prim.total = stock;
+        prim.c = 1;
+        prim.pedido = q || prim.pedido;
+        prim.sync = false;
+        if (envio.indexOf(prim) < 0) envio.push(prim);
+
+        // Delete all redundant duplicate stock records if any
+        if (existingStockRecs.length > 1) {
+          const dups = existingStockRecs.slice(1);
+          workingRegs = workingRegs.filter((x) => !dups.some((d) => d.id === x.id));
+          dups.forEach((d) => encolarDel(d.id, 'registros'));
         }
-      });
-    });
+      } else {
+        // Check if there is an empty placeholder card without deliveries that can hold the stock
+        const emptyCard = workingRegs.find(
+          (x) =>
+            x.op.trim().toLowerCase() === opKey &&
+            (x.fdesp || '') === fdesp &&
+            !esStock(x) &&
+            !(x.total > 0) &&
+            !nuevos.some((n) => n.id === x.id)
+        );
 
-    act.forEach((a) => {
-      registros.forEach((x) => {
-        if (
-          x.op.toLowerCase() === a.op.toLowerCase() &&
-          (x.fdesp || '') === fdesp &&
-          (x.sap || '') === (a.c.sap || '') &&
-          x.ord !== a.ord
-        ) {
-          x.ord = a.ord;
-          x.sync = false;
-          if (envio.indexOf(x) < 0) envio.push(x);
-        }
-      });
-    });
-
-    nuevos.forEach((nr) => {
-      registros.forEach((x) => {
-        if (
-          nuevos.indexOf(x) < 0 &&
-          x.op.toLowerCase() === nr.op.toLowerCase() &&
-          (x.fdesp || '') === fdesp &&
-          x.pedido !== nr.pedido
-        ) {
-          x.pedido = nr.pedido;
-          x.sync = false;
-          if (envio.indexOf(x) < 0) envio.push(x);
-        }
-      });
-    });
-
-    act.forEach((a) => {
-      if (!a.hasS) return;
-      const op = a.op.toLowerCase();
-      const sap = a.c.sap || '';
-      const mismo = (x: Registro) =>
-        x.op.toLowerCase() === op && (x.fdesp || '') === fdesp && (x.sap || '') === sap;
-
-      const t =
-        registros.find((x) => mismo(x) && esStock(x)) ||
-        (a.stock > 0
-          ? registros.find((x) => mismo(x) && !esStock(x) && !(x.total > 0))
-          : null);
-
-      if (t) {
-        if (a.stock > 0) {
-          t.empaque = 'stock';
-          t.u = a.stock;
-          t.c = 1;
-          t.total = a.stock;
+        if (emptyCard) {
+          emptyCard.empaque = 'stock';
+          emptyCard.u = stock;
+          emptyCard.c = 1;
+          emptyCard.total = stock;
+          emptyCard.pedido = q || emptyCard.pedido;
+          emptyCard.sync = false;
+          if (envio.indexOf(emptyCard) < 0) envio.push(emptyCard);
         } else {
-          t.empaque = formEmp;
-          t.u = 0;
-          t.c = 0;
-          t.total = 0;
+          // Create exactly one single stock record for this OP
+          const newStockRec: Registro = {
+            id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+            fecha,
+            fdesp,
+            turno,
+            nombre,
+            op: candidate.op,
+            sap: candidate.sap || '',
+            descripcion: candidate.desc || '',
+            cliente: candidate.cliente || '',
+            pedido: q,
+            empaque: 'stock',
+            u: stock,
+            c: 1,
+            total: stock,
+            estado: '',
+            creado: new Date().toISOString(),
+            sync: false,
+            ord,
+          };
+          nuevos.unshift(newStockRec);
+          envio.push(newStockRec);
         }
-        t.pedido = a.q;
-        t.sync = false;
-        if (envio.indexOf(t) < 0) envio.push(t);
-      } else if (a.stock > 0) {
-        const b = registros.find(mismo) || ({} as any);
-        const n2: Registro = {
-          id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-          fecha,
-          fdesp,
-          turno,
-          nombre,
-          op: a.c.op,
-          sap,
-          descripcion: a.c.desc || b.descripcion || '',
-          cliente: a.c.cliente || b.cliente || '',
-          pedido: a.q,
-          empaque: 'stock',
-          u: a.stock,
-          c: 1,
-          total: a.stock,
-          estado: '',
-          creado: new Date().toISOString(),
-          sync: false,
-          ord: a.ord,
-        };
-        registros.unshift(n2);
-        envio.push(n2);
       }
     });
 
-    const combinedRegs = [...nuevos, ...registros];
+    let combinedRegs = [...nuevos, ...workingRegs];
+
+    // Synchronize pedidos across all cards of the same OP
+    Object.keys(ops).forEach((op) => {
+      const ped = ops[op];
+      combinedRegs.forEach((x) => {
+        if (
+          x.op.toLowerCase() === op.toLowerCase() &&
+          (x.fdesp || '') === fdesp &&
+          x.pedido !== ped
+        ) {
+          x.pedido = ped;
+          x.sync = false;
+          if (envio.indexOf(x) < 0) envio.push(x);
+        }
+      });
+    });
+
+    // Sanitizer guarantees 0 stock duplicates
+    const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(combinedRegs);
+    duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
+    combinedRegs = registrosLimpios;
+
+    // Recalculate status for all affected OPs
     Object.keys(ops).forEach((op) => {
       recalcularEstados(op, fdesp, combinedRegs, planesOp).forEach((x) => {
         if (envio.indexOf(x) < 0) envio.push(x);
@@ -850,7 +865,12 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
 
     onRegistrosChange(combinedRegs, envio);
     setConfirmModalData(null);
-    onToast('ok', `${nuevos.length} tarjeta(s) creadas para el ${fcorta(fdesp)}`);
+    onToast(
+      'ok',
+      `${nuevos.length} registro(s) procesados para el ${fcorta(fdesp)}${
+        duplicadosEliminados.length ? ` · ${duplicadosEliminados.length} stock duplicado eliminado` : ''
+      }`
+    );
   };
 
   // Grid calculation helpers

@@ -25,6 +25,7 @@ import {
 } from './services/storage';
 import {
   colaDel,
+  encolarDel,
   huella,
   llamar,
   normFecha,
@@ -33,7 +34,7 @@ import {
   soloValidos,
 } from './services/sheets';
 import { CAT_HORAS, leerCatalogoSb, normOpSb } from './services/supabase';
-import { hoy, recalcularEstados } from './utils/helpers';
+import { hoy, recalcularEstados, sanitizarStockDuplicados } from './utils/helpers';
 import { Header } from './components/Header';
 import { Toasts } from './components/Toasts';
 import { SyncBadge } from './components/SyncBadge';
@@ -59,7 +60,7 @@ export const App: React.FC = () => {
 
   const [registros, setRegistros] = useState<Registro[]>(() => {
     const raw = ld<Registro[]>(K_REG, []);
-    return raw.map((r: any) => {
+    const mapped = raw.map((r: any) => {
       if (!r.mov && r.total === undefined) {
         const e = (r.entTotal || 0) > 0;
         r.mov = e ? 'Entregado' : 'Por entregar';
@@ -82,6 +83,13 @@ export const App: React.FC = () => {
       if (!r.fdesp) r.fdesp = r.fecha;
       return r;
     });
+
+    const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(mapped);
+    if (duplicadosEliminados.length > 0) {
+      duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
+      sv(K_REG, registrosLimpios);
+    }
+    return registrosLimpios;
   });
 
   const [ingresos, setIngresos] = useState<Ingreso[]>(() => ld<Ingreso[]>(K_ING, []));
@@ -332,6 +340,12 @@ export const App: React.FC = () => {
         newNombres.sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
         setNombres(newNombres);
         sv(K_NOM, newNombres);
+
+        const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(curr);
+        if (duplicadosEliminados.length > 0) {
+          duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
+          curr = registrosLimpios;
+        }
 
         setRegistros(curr);
         sv(K_REG, curr);

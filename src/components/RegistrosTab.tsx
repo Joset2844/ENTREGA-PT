@@ -10,8 +10,10 @@ import {
   fcorta,
   hoy,
   recalcularEstados,
+  sanitizarStockDuplicados,
 } from '../utils/helpers';
 import { descargarXml, xmlEntregas } from '../services/excel';
+import { encolarDel } from '../services/sheets';
 import { EditarStockModal } from './EditarStockModal';
 
 interface RegistrosTabProps {
@@ -92,24 +94,45 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
   const handleGuardarStockEdit = (newStock: number) => {
     if (!stockEditModal) return;
     const { op, fdesp, pedido } = stockEditModal;
-    const q = op.toLowerCase();
+    const q = op.trim().toLowerCase();
 
     let updatedRegs = [...registros];
     const envio: Registro[] = [];
 
-    const stockRec = updatedRegs.find(
-      (x) => esStock(x) && x.op.toLowerCase() === q && (x.fdesp || '') === fdesp
+    // Find ALL stock records for this OP and fdesp
+    const stockRecs = updatedRegs.filter(
+      (x) => esStock(x) && x.op.trim().toLowerCase() === q && (x.fdesp || x.fecha || '') === fdesp
     );
 
-    if (stockRec) {
-      stockRec.u = newStock;
-      stockRec.total = newStock;
-      stockRec.c = 1;
-      stockRec.sync = false;
-      envio.push(stockRec);
+    if (stockRecs.length > 0) {
+      if (newStock > 0) {
+        const prim = stockRecs[0];
+        prim.u = newStock;
+        prim.total = newStock;
+        prim.c = 1;
+        prim.sync = false;
+        envio.push(prim);
+      } else {
+        // newStock is 0: remove all stock records for this OP in this despacho
+        updatedRegs = updatedRegs.filter((x) => !stockRecs.some((s) => s.id === x.id));
+        stockRecs.forEach((s) => {
+          onBorrarRemoto(s.id);
+          encolarDel(s.id, 'registros');
+        });
+      }
+
+      // If duplicate stock records were present, delete them permanently
+      if (stockRecs.length > 1) {
+        const dups = stockRecs.slice(1);
+        updatedRegs = updatedRegs.filter((x) => !dups.some((d) => d.id === x.id));
+        dups.forEach((d) => {
+          onBorrarRemoto(d.id);
+          encolarDel(d.id, 'registros');
+        });
+      }
     } else if (newStock > 0) {
       const ref = updatedRegs.find(
-        (x) => x.op.toLowerCase() === q && (x.fdesp || '') === fdesp
+        (x) => x.op.trim().toLowerCase() === q && (x.fdesp || x.fecha || '') === fdesp
       );
       const newRec: Registro = {
         id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
@@ -134,6 +157,14 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
       envio.push(newRec);
     }
 
+    // Sanitize any remaining duplicates
+    const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(updatedRegs);
+    duplicadosEliminados.forEach((d) => {
+      onBorrarRemoto(d.id);
+      encolarDel(d.id, 'registros');
+    });
+    updatedRegs = registrosLimpios;
+
     const camb = recalcularEstados(op, fdesp, updatedRegs, planesOp);
     camb.forEach((x) => {
       if (envio.indexOf(x) < 0) envio.push(x);
@@ -141,7 +172,24 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
 
     onRegistrosChange(updatedRegs, envio);
     setStockEditModal(null);
-    onToast('ok', `Stock inicial de ${op} actualizado a ${newStock} u`);
+    onToast('ok', `Stock inicial de ${op} establecido en ${newStock} u`);
+  };
+
+  const handleDepurarStock = () => {
+    const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(registros);
+    if (!duplicadosEliminados.length) {
+      onToast('ok', 'Todo en orden: no se detectaron duplicados de stock inicial');
+      return;
+    }
+    duplicadosEliminados.forEach((d) => {
+      onBorrarRemoto(d.id);
+      encolarDel(d.id, 'registros');
+    });
+    onRegistrosChange(registrosLimpios);
+    onToast(
+      'ok',
+      `Se consolidó el stock inicial y se eliminaron ${duplicadosEliminados.length} registro(s) duplicado(s)`
+    );
   };
 
   const handleBorrar = (r: Registro) => {
@@ -394,6 +442,15 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
         </button>
         <button className="btn-s" id="traeSb" type="button" onClick={onTraerSheets}>
           Traer de Sheets
+        </button>
+        <button
+          className="btn-s"
+          id="depurarStock"
+          type="button"
+          onClick={handleDepurarStock}
+          title="Detecta, consolida y elimina stock inicial duplicado"
+        >
+          🧹 Depurar stock
         </button>
         <button
           className="btn-s"

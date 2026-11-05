@@ -70,26 +70,90 @@ export function esStock(r: Partial<Registro> | undefined): boolean {
   return !!r && r.empaque === 'stock';
 }
 
+/**
+ * Retorna el stock inicial único de una OP en un despacho determinado.
+ * Si por alguna razón existen registros duplicados en el historial, NO los suma:
+ * toma el valor canónico (el más alto / más reciente) para evitar que se dupliquen las cifras.
+ */
 export function stockDe(op: string, fd: string, registros: Registro[]): number {
   const q = (op || '').trim().toLowerCase();
-  let t = 0;
+  const f = (fd || '').trim();
+  let maxStock = 0;
   registros.forEach((x) => {
-    if (esStock(x) && x.op.toLowerCase() === q && (x.fdesp || '') === (fd || '')) {
-      t += x.total || 0;
+    if (
+      esStock(x) &&
+      x.op.trim().toLowerCase() === q &&
+      (x.fdesp || x.fecha || '').trim() === f
+    ) {
+      if ((x.total || 0) > maxStock) {
+        maxStock = x.total || 0;
+      }
     }
   });
-  return t;
+  return maxStock;
 }
 
+/**
+ * Calcula el acumulado real de una OP en un despacho:
+ * Suma de todas las entregas reales (excluyendo entradas de tipo stock) + el stock inicial único.
+ * Esto garantiza matemáticamente que el stock inicial jamás se duplique en el acumulado.
+ */
 export function acumulado(op: string, fd: string, registros: Registro[]): number {
   const q = (op || '').trim().toLowerCase();
-  let t = 0;
+  const f = (fd || '').trim();
+  let entregas = 0;
   registros.forEach((x) => {
-    if (x.op.toLowerCase() === q && (x.fdesp || '') === (fd || '')) {
-      t += x.total || 0;
+    if (
+      !esStock(x) &&
+      x.op.trim().toLowerCase() === q &&
+      (x.fdesp || x.fecha || '').trim() === f
+    ) {
+      entregas += x.total || 0;
     }
   });
-  return t;
+  const stk = stockDe(op, fd, registros);
+  return entregas + stk;
+}
+
+/**
+ * Detecta y consolida registros de stock inicial duplicados para la misma OP y despacho.
+ * Devuelve la lista limpia y la lista de registros duplicados eliminados.
+ */
+export function sanitizarStockDuplicados(registros: Registro[]): {
+  registrosLimpios: Registro[];
+  duplicadosEliminados: Registro[];
+} {
+  const vistosStock: Record<string, Registro> = {};
+  const duplicadosEliminados: Registro[] = [];
+  const registrosLimpios: Registro[] = [];
+
+  registros.forEach((r) => {
+    if (!esStock(r)) {
+      registrosLimpios.push(r);
+      return;
+    }
+
+    const opKey = (r.op || '').trim().toLowerCase();
+    const fdKey = (r.fdesp || r.fecha || '').trim();
+    const k = `${opKey}|${fdKey}`;
+
+    if (!vistosStock[k]) {
+      vistosStock[k] = r;
+      registrosLimpios.push(r);
+    } else {
+      // Ya existe un registro de stock para esta OP en este despacho. Es un duplicado.
+      const principal = vistosStock[k];
+      if ((r.total || 0) > (principal.total || 0)) {
+        principal.u = r.u || r.total || 0;
+        principal.total = r.total || 0;
+        principal.c = 1;
+        principal.sync = false;
+      }
+      duplicadosEliminados.push(r);
+    }
+  });
+
+  return { registrosLimpios, duplicadosEliminados };
 }
 
 export function ultimoPedido(op: string, fd: string, registros: Registro[]): number {
@@ -253,7 +317,9 @@ export function agrupar(
     const esS = esStock(r);
     const tt = esS ? 0 : r.total || 0;
     o.ent += tt;
-    if (esS) o.stock += r.total || 0;
+    if (esS) {
+      o.stock = Math.max(o.stock, r.total || 0);
+    }
     if (r.pedido) o.pedido = r.pedido;
     const pp = pedidoPlanOp(r.op, fd, planesOp);
     if (pp) o.pedido = pp;
@@ -273,10 +339,21 @@ export function agrupar(
         stock: 0,
         cli: {},
         ops: {},
+        _stockOps: {},
       });
     if (ordenS.indexOf(gk) === -1) ordenS.push(gk);
     S.ent += tt;
-    if (esS) S.stock += r.total || 0;
+    if (esS) {
+      const opKey = r.op.trim().toLowerCase();
+      if (!S._stockOps) S._stockOps = {};
+      if (!S._stockOps[opKey]) {
+        S._stockOps[opKey] = r.total || 0;
+        S.stock += r.total || 0;
+      } else if ((r.total || 0) > S._stockOps[opKey]) {
+        S.stock += (r.total || 0) - S._stockOps[opKey];
+        S._stockOps[opKey] = r.total || 0;
+      }
+    }
     if (r.cliente) S.cli[r.cliente] = 1;
     S.ops[r.op] = 1;
   });
@@ -364,11 +441,18 @@ export function agruparReporte(
     );
     const m = meta(recs);
     const opsK: Record<string, number> = {};
-    let acum = 0;
+    let entSap = 0;
     recs.forEach((r) => {
       opsK[r.op.toLowerCase()] = 1;
-      acum += r.total || 0;
+      if (!esStock(r)) {
+        entSap += r.total || 0;
+      }
     });
+    let stockSap = 0;
+    Object.keys(opsK).forEach((opKey) => {
+      stockSap += stockDe(opKey, x.fdesp, todosRegistros);
+    });
+    const acum = entSap + stockSap;
 
     let ped = 0;
     let conj = false;

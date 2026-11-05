@@ -4,8 +4,8 @@ import { CatalogoOp, Ingreso, Registro } from '../types';
 import { catTs, leerCatalogoSb, normOpSb } from '../services/supabase';
 import { K_CAT, K_CATTS, K_RES, ld, sv } from '../services/storage';
 import { archivoOk } from '../services/excel';
-import { hoy, norm } from '../utils/helpers';
-import { validoRec } from '../services/sheets';
+import { hoy, norm, sanitizarStockDuplicados } from '../utils/helpers';
+import { encolarDel, validoRec } from '../services/sheets';
 
 interface ConfigTabProps {
   nombres: string[];
@@ -453,7 +453,8 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
         r.sync = false;
       });
 
-      const newCombinedRegs = [...registros, ...nR];
+      const { registrosLimpios } = sanitizarStockDuplicados([...registros, ...nR]);
+      const newCombinedRegs = registrosLimpios;
       const newCombinedIngs = [...ingresos, ...nI];
 
       const newNombres = [...nombres];
@@ -629,6 +630,35 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
           {ultimoRespaldo
             ? `Último respaldo descargado: ${ultimoRespaldo}`
             : 'Aún no has descargado ningún respaldo en este equipo'}
+        </div>
+      </div>
+
+      {/* Mantenimiento de stock */}
+      <div className="panel">
+        <div className="sec">Mantenimiento de stock inicial</div>
+        <p className="info" style={{ margin: '0 0 10px' }}>
+          Analiza y consolida el stock inicial de todas las OPs en sus despachos correspondientes, eliminando entradas duplicadas residuales tanto en la memoria local como en Google Sheets.
+        </p>
+        <div className="tools">
+          <button
+            className="btn-s"
+            type="button"
+            onClick={() => {
+              const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(registros);
+              if (!duplicadosEliminados.length) {
+                onToast('ok', 'Excelente: no se detectaron duplicados de stock inicial');
+                return;
+              }
+              duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
+              onRegistrosChange(registrosLimpios);
+              onToast(
+                'ok',
+                `Se consolidó el stock inicial y se eliminaron ${duplicadosEliminados.length} registro(s) duplicado(s)`
+              );
+            }}
+          >
+            🧹 Depurar stock duplicado
+          </button>
         </div>
       </div>
     </div>
