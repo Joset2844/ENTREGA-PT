@@ -115,9 +115,10 @@ export function xmlEntregas(
   fl: Registro[],
   registrosContext: Registro[],
   fDespFiltro: string,
-  planesOp: Record<string, PlanOp>
+  planesOp: Record<string, PlanOp>,
+  opExtra?: Record<string, import('../types').OpExtra>
 ): string {
-  const g = agruparReporte(fl, registrosContext, fDespFiltro, planesOp);
+  const g = agruparReporte(fl, registrosContext, fDespFiltro, planesOp, opExtra);
   const ents = entregasReales(fl);
 
   const r1 = [
@@ -156,15 +157,15 @@ export function xmlEntregas(
         ce(r.total || 0, 'sE', true) +
         ce(detalle(r), 'sK') +
         ce(
-          estadoReg(r, registrosContext, planesOp),
-          EST_STYLE[estadoReg(r, registrosContext, planesOp)] || 'sK'
+          estadoReg(r, registrosContext, planesOp, opExtra),
+          EST_STYLE[estadoReg(r, registrosContext, planesOp, opExtra)] || 'sK'
         ) +
         '</Row>'
     );
   });
 
   const r2 = [
-    filaT('RESUMEN POR OP (lista completa, en el orden de la carga)', 10),
+    filaT('RESUMEN POR OP (lista completa, en el orden de la carga)', 13),
     filaH([
       'DESPACHO',
       'OP',
@@ -176,6 +177,8 @@ export function xmlEntregas(
       'ACUMULADO (stock + entregado)',
       'FALTANTE',
       'EXCEDENTE',
+      'EN PLANTA (sin registrar)',
+      '¿EN PRODUCCIÓN?',
       'ESTADO',
     ]),
   ];
@@ -183,7 +186,9 @@ export function xmlEntregas(
   g.ops.forEach((o) => {
     const pd = o.pedido - o.acum;
     const ex = o.pedido > 0 ? Math.max(-pd, 0) : 0;
-    const es = estadoDe(o.op, o.fdesp, registrosContext, planesOp);
+    const es = estadoDe(o.op, o.fdesp, registrosContext, planesOp, opExtra);
+    const cantPl = o.cantPlanta || 0;
+    const enPr = Boolean(o.enProduccion);
     r2.push(
       '<Row>' +
         ce(fcorta(o.fdesp), 'sK') +
@@ -196,6 +201,8 @@ export function xmlEntregas(
         ce(o.acum, 'sN', true) +
         ce(Math.max(pd, 0), pd > 0 ? 'sP' : 'sE', true) +
         ce(ex, ex > 0 ? 'sX' : 'sN', true) +
+        ce(cantPl, cantPl > 0 ? 'sPr' : 'sN', true) +
+        ce(enPr ? 'SÍ' : 'NO', enPr ? 'sPr' : 'sK') +
         ce(es, EST_STYLE[es] || 'sK') +
         '</Row>'
     );
@@ -242,7 +249,7 @@ export function xmlEntregas(
     '<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" xmlns:html="http://www.w3.org/TR/REC-html40">' +
     ESTILOS +
     hojaXml('Entregas', [85, 85, 60, 115, 85, 85, 280, 160, 95, 85, 130, 105], r1) +
-    hojaXml('Resumen OP', [85, 90, 180, 260, 90, 95, 120, 150, 100, 100, 100], r2) +
+    hojaXml('Resumen OP', [85, 90, 180, 260, 90, 95, 120, 150, 100, 100, 110, 100, 110], r2) +
     hojaXml('Resumen SAP', [85, 90, 300, 170, 90, 95, 120, 150, 100, 100, 100, 200], r3) +
     '</Workbook>'
   );

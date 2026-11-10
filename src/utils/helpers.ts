@@ -1,4 +1,4 @@
-import { CatalogoOp, PlanDespacho, PlanOp, Registro } from '../types';
+import { CatalogoOp, OpExtra, PlanDespacho, PlanOp, Registro } from '../types';
 
 export const LIM = {
   fechaFut: 3,
@@ -214,8 +214,14 @@ export function estadoDe(
   op: string,
   fd: string,
   registros: Registro[],
-  planesOp: Record<string, PlanOp>
+  planesOp: Record<string, PlanOp>,
+  opExtra?: Record<string, OpExtra>
 ): string {
+  const k = op.trim().toLowerCase() + '|' + (fd || '');
+  const extra = opExtra?.[k] || opExtra?.[op.trim().toLowerCase()];
+  if (extra?.enProduccion) {
+    return 'EN PRODUCCION';
+  }
   const p = pedidoPlanOp(op, fd, planesOp) || ultimoPedido(op, fd, registros);
   if (!p) return '';
   return acumulado(op, fd, registros) >= p ? 'COMPLETO' : 'INCOMPLETO';
@@ -224,20 +230,22 @@ export function estadoDe(
 export function estadoReg(
   r: Registro,
   registros: Registro[],
-  planesOp: Record<string, PlanOp>
+  planesOp: Record<string, PlanOp>,
+  opExtra?: Record<string, OpExtra>
 ): string {
-  return estadoDe(r.op, r.fdesp, registros, planesOp) || r.estado || '';
+  return estadoDe(r.op, r.fdesp, registros, planesOp, opExtra) || r.estado || '';
 }
 
 export function recalcularEstados(
   op: string,
   fd: string,
   registros: Registro[],
-  planesOp: Record<string, PlanOp>
+  planesOp: Record<string, PlanOp>,
+  opExtra?: Record<string, OpExtra>
 ): Registro[] {
   const q = op.toLowerCase();
   const ch: Registro[] = [];
-  const e = estadoDe(op, fd, registros, planesOp);
+  const e = estadoDe(op, fd, registros, planesOp, opExtra);
   registros.forEach((x) => {
     if (x.op.toLowerCase() === q && (x.fdesp || '') === (fd || '') && x.estado !== e) {
       x.estado = e;
@@ -262,6 +270,8 @@ export interface GrupoOp {
   lineas: Record<string, { sap: string; desc: string; ent: number }>;
   acum: number;
   desc: string;
+  enProduccion?: boolean;
+  cantPlanta?: number;
   ord?: number;
   pos?: number;
   nsap?: number;
@@ -291,7 +301,8 @@ export interface GrupoSap {
 export function agrupar(
   rs: Registro[],
   registrosContext: Registro[],
-  planesOp: Record<string, PlanOp>
+  planesOp: Record<string, PlanOp>,
+  opExtra?: Record<string, OpExtra>
 ): { ops: GrupoOp[]; saps: GrupoSap[] } {
   const ops: Record<string, any> = {};
   const ordenO: string[] = [];
@@ -367,6 +378,9 @@ export function agrupar(
       if (d) ds[d] = 1;
     });
     o.desc = Object.keys(ds).join(' + ');
+    const extra = opExtra?.[k] || opExtra?.[o.op.trim().toLowerCase()];
+    o.enProduccion = Boolean(extra?.enProduccion);
+    o.cantPlanta = typeof extra?.cantPlanta === 'number' ? extra.cantPlanta : 0;
     return o;
   });
 
@@ -383,7 +397,8 @@ export function agruparReporte(
   fl: Registro[],
   todosRegistros: Registro[],
   fDespFiltro: string,
-  planesOp: Record<string, PlanOp>
+  planesOp: Record<string, PlanOp>,
+  opExtra?: Record<string, OpExtra>
 ) {
   const fds: Record<string, number> = {};
   fl.forEach((r) => {
@@ -397,7 +412,7 @@ export function agruparReporte(
     pos[r.id] = i;
   });
 
-  const g = agrupar(base, todosRegistros, planesOp);
+  const g = agrupar(base, todosRegistros, planesOp, opExtra);
   const eo: Record<string, number> = {};
   const es: Record<string, number> = {};
 
@@ -432,6 +447,9 @@ export function agruparReporte(
     o.pos = m.pos;
     o.nsap = Object.keys(sp).length;
     o.entF = eo[k + '|' + o.fdesp] || 0;
+    const extra = opExtra?.[k + '|' + o.fdesp] || opExtra?.[k];
+    o.enProduccion = Boolean(extra?.enProduccion);
+    o.cantPlanta = typeof extra?.cantPlanta === 'number' ? extra.cantPlanta : 0;
   });
 
   g.saps.forEach((x) => {
@@ -464,7 +482,7 @@ export function agruparReporte(
       if (!o) return;
       if (o.nsap && o.nsap > 1) conj = true;
       else ped += o.pedido;
-      const e = estadoDe(o.op, o.fdesp, todosRegistros, planesOp);
+      const e = estadoDe(o.op, o.fdesp, todosRegistros, planesOp, opExtra);
       if (e === 'INCOMPLETO') inc = true;
       if (e === 'COMPLETO') comp = true;
     });

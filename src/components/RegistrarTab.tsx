@@ -8,6 +8,7 @@ import {
   Registro,
   ConfirmRow,
   Candidate,
+  OpExtra,
 } from '../types';
 import {
   acumulado,
@@ -38,6 +39,7 @@ import {
 import { encolarDel } from '../services/sheets';
 import { ConfirmarListaModal } from './ConfirmarListaModal';
 import { EditarStockModal } from './EditarStockModal';
+import { EditarPlantaModal } from './EditarPlantaModal';
 import { K_GRID, ld, sv } from '../services/storage';
 
 interface RegistrarTabProps {
@@ -55,6 +57,8 @@ interface RegistrarTabProps {
   onPlanesOpChange: (p: Record<string, PlanOp>) => void;
   modoReg: 'tabla' | 'form';
   onModoRegChange: (m: 'tabla' | 'form') => void;
+  opExtra: Record<string, OpExtra>;
+  onUpdateOpExtra: (op: string, fdesp: string, changes: Partial<OpExtra>) => void;
   onToast: (t: 'ok' | 'error', m: string) => void;
 }
 
@@ -73,6 +77,8 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   onPlanesOpChange,
   modoReg,
   onModoRegChange,
+  opExtra,
+  onUpdateOpExtra,
   onToast,
 }) => {
   // Form State
@@ -106,12 +112,61 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     rows: ConfirmRow[];
   } | null>(null);
 
+  const [formEnProduccion, setFormEnProduccion] = useState(false);
+  const [formPlanta, setFormPlanta] = useState('0');
+
   const [stockEditModal, setStockEditModal] = useState<{
     op: string;
     fdesp: string;
     currentStock: number;
     pedido?: number;
   } | null>(null);
+
+  const [plantaEditModal, setPlantaEditModal] = useState<{
+    op: string;
+    fdesp: string;
+    currentPlanta: number;
+    currentEnProduccion: boolean;
+    pedido?: number;
+    entregado?: number;
+    stock?: number;
+  } | null>(null);
+
+  const handleToggleEnProduccion = (op: string, fd: string, val: boolean) => {
+    onUpdateOpExtra(op, fd, { enProduccion: val });
+    const camb = recalcularEstados(op, fd, registros, planesOp, {
+      ...opExtra,
+      [op.trim().toLowerCase() + '|' + (fd || '')]: {
+        ...(opExtra[op.trim().toLowerCase() + '|' + (fd || '')] || {}),
+        enProduccion: val,
+      },
+    });
+    if (camb.length > 0) {
+      onRegistrosChange(registros, camb);
+    }
+    onToast('ok', `${op}: ${val ? 'Marcada EN PRODUCCIÓN' : 'Desmarcada de producción'}`);
+  };
+
+  const handleSavePlantaModal = (data: { enProduccion: boolean; cantPlanta: number }) => {
+    if (!plantaEditModal) return;
+    const { op, fdesp: modalFd } = plantaEditModal;
+    onUpdateOpExtra(op, modalFd, data);
+    const camb = recalcularEstados(op, modalFd, registros, planesOp, {
+      ...opExtra,
+      [op.trim().toLowerCase() + '|' + (modalFd || '')]: {
+        ...(opExtra[op.trim().toLowerCase() + '|' + (modalFd || '')] || {}),
+        ...data,
+      },
+    });
+    if (camb.length > 0) {
+      onRegistrosChange(registros, camb);
+    }
+    setPlantaEditModal(null);
+    onToast(
+      'ok',
+      `${op}: Planta actualizada (${data.cantPlanta} u sin reg. · ${data.enProduccion ? 'En producción' : 'Sin prod.'})`
+    );
+  };
 
   const handleGuardarStockEdit = (newStock: number) => {
     if (!stockEditModal) return;
@@ -220,6 +275,24 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     const p = pedidoDe(op, fdesp, registros, catalogo, planesOp, planes);
     if (p) setFormPedido(String(p));
   }, [formOp, fdesp, registros, catalogo, planesOp, planes, opPedidoVista]);
+
+  // Sync Planta and EnProduccion on formOp change
+  useEffect(() => {
+    if (!formOp.trim()) {
+      setFormEnProduccion(false);
+      setFormPlanta('0');
+      return;
+    }
+    const k = formOp.trim().toLowerCase() + '|' + (fdesp || '');
+    const extra = opExtra[k] || opExtra[formOp.trim().toLowerCase()];
+    if (extra) {
+      setFormEnProduccion(Boolean(extra.enProduccion));
+      setFormPlanta(String(extra.cantPlanta || 0));
+    } else {
+      setFormEnProduccion(false);
+      setFormPlanta('0');
+    }
+  }, [formOp, fdesp, opExtra]);
 
   // Handle OP selection in Form
   const aplicarOpForm = (m: CatalogoOp) => {
@@ -372,8 +445,22 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       }
     });
 
+    if (formEnProduccion || parseInt(formPlanta, 10) > 0) {
+      onUpdateOpExtra(r.op, r.fdesp, {
+        enProduccion: formEnProduccion,
+        cantPlanta: Math.max(0, parseInt(formPlanta, 10) || 0),
+      });
+    }
+
     const newRegs = [r, ...registros];
-    const camb2 = recalcularEstados(r.op, r.fdesp, newRegs, planesOp);
+    const camb2 = recalcularEstados(r.op, r.fdesp, newRegs, planesOp, {
+      ...opExtra,
+      [r.op.toLowerCase() + '|' + (r.fdesp || '')]: {
+        ...(opExtra[r.op.toLowerCase() + '|' + (r.fdesp || '')] || {}),
+        enProduccion: formEnProduccion,
+        cantPlanta: Math.max(0, parseInt(formPlanta, 10) || 0),
+      },
+    });
     const toSend = [r, ...cambiados, ...camb2].filter(
       (item, pos, arr) => arr.indexOf(item) === pos
     );
@@ -1223,7 +1310,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     (a, r) => a + (esStock(r) ? r.total || 0 : 0),
     0
   );
-  const groupedSub = agrupar(sub, registros, planesOp);
+  const groupedSub = agrupar(sub, registros, planesOp, opExtra);
 
   // Suggestions list for OP input
   const sugList = formOp.trim()
@@ -1695,6 +1782,75 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
               </div>
             )}
 
+            {formOp.trim() && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  flexWrap: 'wrap',
+                  background: formEnProduccion ? 'rgba(66, 153, 225, 0.1)' : 'var(--alt)',
+                  border: formEnProduccion ? '1px solid var(--blue)' : '1px solid var(--border)',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  margin: '0 0 14px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    fontWeight: 700,
+                    fontSize: '0.88rem',
+                    color: formEnProduccion ? 'var(--blue)' : 'var(--text)',
+                    margin: 0,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={formEnProduccion}
+                    onChange={(e) => setFormEnProduccion(e.target.checked)}
+                    style={{
+                      width: '18px',
+                      height: '18px',
+                      minHeight: '18px',
+                      accentColor: 'var(--blue)',
+                      margin: 0,
+                      cursor: 'pointer',
+                    }}
+                  />
+                  <span>¿OP en producción?</span>
+                </label>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 600 }}>
+                    Queda en planta:
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    className="mono"
+                    placeholder="0"
+                    value={formPlanta}
+                    onChange={(e) => setFormPlanta(e.target.value)}
+                    style={{
+                      width: '85px',
+                      minHeight: '34px',
+                      padding: '4px 8px',
+                      fontSize: '0.86rem',
+                      fontWeight: 700,
+                    }}
+                    title="Cantidad que queda en planta sin registrarse"
+                  />
+                  <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>u</span>
+                </div>
+              </div>
+            )}
+
             <label>Entregado</label>
             <div className="chips" id="emp-tipo">
               <button
@@ -1780,6 +1936,8 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                   <th className="n">Acumulado</th>
                   <th className="n">Pendiente</th>
                   <th className="n">Excedente</th>
+                  <th className="n">En planta</th>
+                  <th className="k">¿En prod.?</th>
                   <th className="k">Estado</th>
                   <th style={{ textAlign: 'right' }}>Acciones</th>
                 </tr>
@@ -1788,6 +1946,8 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                 {groupedSub.ops.map((o) => {
                   const pd = o.pedido - o.acum;
                   const ok = o.pedido > 0 && pd <= 0;
+                  const enProd = Boolean(o.enProduccion);
+                  const cantPlanta = o.cantPlanta || 0;
                   return (
                     <tr key={o.op}>
                       <td className="td-op op-cell">
@@ -1833,32 +1993,168 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                           '0'
                         )}
                       </td>
-                      <td className="k">
-                        {o.pedido > 0 && (
-                          <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
-                            {ok
-                              ? pd < 0
-                                ? `COMPLETO (+${-pd})`
-                                : 'COMPLETO'
-                              : `Faltan ${pd}`}
-                          </span>
-                        )}
-                      </td>
-                      <td className="actions">
+                      <td className="n">
                         <button
-                          className="stock-btn"
                           type="button"
+                          className="btn-s"
+                          style={{
+                            padding: '3px 8px',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                            minHeight: '28px',
+                            background: cantPlanta > 0 ? 'var(--blue)' : 'var(--field)',
+                            color: cantPlanta > 0 ? '#fff' : 'var(--muted2)',
+                            borderColor: cantPlanta > 0 ? 'var(--blue)' : 'var(--inp)',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                          }}
                           onClick={() =>
-                            setStockEditModal({
+                            setPlantaEditModal({
                               op: o.op,
                               fdesp: o.fdesp,
-                              currentStock: o.stock || 0,
+                              currentPlanta: cantPlanta,
+                              currentEnProduccion: enProd,
                               pedido: o.pedido,
+                              entregado: o.ent,
+                              stock: o.stock,
                             })
                           }
+                          title="Clic para editar la cantidad restante en planta"
                         >
-                          ✏️ Stock ({o.stock || 0})
+                          {cantPlanta > 0 ? `🏭 ${cantPlanta} u` : '0 u'}
                         </button>
+                      </td>
+                      <td className="k" style={{ textAlign: 'center' }}>
+                        <label
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            cursor: 'pointer',
+                            margin: 0,
+                            fontSize: '0.82rem',
+                            fontWeight: 600,
+                            userSelect: 'none',
+                          }}
+                          title="Marcar si esta OP está en producción"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={enProd}
+                            onChange={(e) => handleToggleEnProduccion(o.op, o.fdesp, e.target.checked)}
+                            style={{
+                              width: '18px',
+                              height: '18px',
+                              minHeight: '18px',
+                              cursor: 'pointer',
+                              accentColor: 'var(--blue)',
+                            }}
+                          />
+                          <span
+                            style={{
+                              color: enProd ? 'var(--blue)' : 'var(--muted)',
+                              fontWeight: enProd ? 700 : 500,
+                            }}
+                          >
+                            {enProd ? 'En prod.' : 'No'}
+                          </span>
+                        </label>
+                      </td>
+                      <td className="k">
+                        {enProd ? (
+                          <div>
+                            <span className="badge b-ENPRODUCCION">EN PRODUCCIÓN</span>
+                            {o.pedido > 0 && (
+                              <div
+                                style={{
+                                  fontSize: '0.72rem',
+                                  marginTop: '3px',
+                                  fontWeight: 600,
+                                  color: ok ? 'var(--green)' : 'var(--muted)',
+                                }}
+                              >
+                                {ok
+                                  ? pd < 0
+                                    ? `Cubierto (+${-pd})`
+                                    : 'Cubierto'
+                                  : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
+                              </div>
+                            )}
+                          </div>
+                        ) : o.pedido > 0 ? (
+                          <div>
+                            <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
+                              {ok
+                                ? pd < 0
+                                  ? `COMPLETO (+${-pd})`
+                                  : 'COMPLETO'
+                                : `Faltan ${pd}`}
+                            </span>
+                            {cantPlanta > 0 && !ok && (
+                              <div
+                                style={{
+                                  fontSize: '0.72rem',
+                                  marginTop: '3px',
+                                  color: 'var(--blue)',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                🏭 {cantPlanta} u en planta
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          cantPlanta > 0 && (
+                            <span
+                              style={{
+                                fontSize: '0.76rem',
+                                color: 'var(--blue)',
+                                fontWeight: 600,
+                              }}
+                            >
+                              🏭 {cantPlanta} u en planta
+                            </span>
+                          )
+                        )}
+                      </td>
+                      <td className="actions" style={{ whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'inline-flex', gap: '4px', justifyContent: 'flex-end' }}>
+                          <button
+                            className="stock-btn"
+                            type="button"
+                            onClick={() =>
+                              setPlantaEditModal({
+                                op: o.op,
+                                fdesp: o.fdesp,
+                                currentPlanta: cantPlanta,
+                                currentEnProduccion: enProd,
+                                pedido: o.pedido,
+                                entregado: o.ent,
+                                stock: o.stock,
+                              })
+                            }
+                            title="Editar cantidad en planta y estado de producción"
+                            style={{
+                              borderColor: cantPlanta > 0 || enProd ? 'var(--blue)' : undefined,
+                            }}
+                          >
+                            🏭 Planta
+                          </button>
+                          <button
+                            className="stock-btn"
+                            type="button"
+                            onClick={() =>
+                              setStockEditModal({
+                                op: o.op,
+                                fdesp: o.fdesp,
+                                currentStock: o.stock || 0,
+                                pedido: o.pedido,
+                              })
+                            }
+                          >
+                            ✏️ Stock ({o.stock || 0})
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1888,6 +2184,20 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
           pedido={stockEditModal.pedido}
           onSave={handleGuardarStockEdit}
           onClose={() => setStockEditModal(null)}
+        />
+      )}
+
+      {plantaEditModal && (
+        <EditarPlantaModal
+          op={plantaEditModal.op}
+          fdesp={plantaEditModal.fdesp}
+          currentPlanta={plantaEditModal.currentPlanta}
+          currentEnProduccion={plantaEditModal.currentEnProduccion}
+          pedido={plantaEditModal.pedido}
+          entregado={plantaEditModal.entregado}
+          stock={plantaEditModal.stock}
+          onSave={handleSavePlantaModal}
+          onClose={() => setPlantaEditModal(null)}
         />
       )}
     </div>

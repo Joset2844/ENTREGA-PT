@@ -112,3 +112,8 @@ export interface ToastItem {
   tipo: 'ok' | 'error';
   mensaje: string;
 }
+
+export interface OpExtra {
+  enProduccion?: boolean;
+  cantPlanta?: number;
+}

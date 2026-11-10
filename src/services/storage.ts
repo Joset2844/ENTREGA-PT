@@ -13,6 +13,7 @@ export const K_MODO_ING = 'ctrl_modo_ing';
 export const K_RES = 'ctrl_ultimo_respaldo';
 export const K_GRID = 'ctrl_grid_';
 export const K_IGRID = 'ctrl_grid_ing_';
+export const K_OP_EXTRA = 'ctrl_op_extra';
 
 export function requestStoragePersistence() {
   try {

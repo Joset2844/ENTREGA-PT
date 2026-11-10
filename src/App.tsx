@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   CatalogoOp,
   Ingreso,
+  OpExtra,
   PlanDespacho,
   PlanOp,
   Registro,
@@ -14,6 +15,7 @@ import {
   K_MODO_ING,
   K_MODO_REG,
   K_NOM,
+  K_OP_EXTRA,
   K_PLAN,
   K_PLANOP,
   K_REG,
@@ -99,6 +101,23 @@ export const App: React.FC = () => {
   const [planesOp, setPlanesOp] = useState<Record<string, PlanOp>>(() =>
     ld<Record<string, PlanOp>>(K_PLANOP, {})
   );
+  const [opExtra, setOpExtra] = useState<Record<string, OpExtra>>(() =>
+    ld<Record<string, OpExtra>>(K_OP_EXTRA, {})
+  );
+
+  const handleUpdateOpExtra = useCallback((op: string, fd: string, changes: Partial<OpExtra>) => {
+    const k = op.trim().toLowerCase() + '|' + (fd || '');
+    setOpExtra((prev) => {
+      const cur = prev[k] || prev[op.trim().toLowerCase()] || {};
+      const nextVal = { ...cur, ...changes };
+      const updated = { ...prev, [k]: nextVal };
+      if (!fd) {
+        updated[op.trim().toLowerCase()] = nextVal;
+      }
+      sv(K_OP_EXTRA, updated);
+      return updated;
+    });
+  }, []);
 
   // Reg Context
   const [fecha, setFecha] = useState(() => {
@@ -652,6 +671,8 @@ export const App: React.FC = () => {
             onPlanesOpChange={handlePlanesOpChange}
             modoReg={modoReg}
             onModoRegChange={setModoReg}
+            opExtra={opExtra}
+            onUpdateOpExtra={handleUpdateOpExtra}
             onToast={toast}
           />
         )}
@@ -662,6 +683,8 @@ export const App: React.FC = () => {
             onRegistrosChange={handleRegistrosChange}
             nombres={nombres}
             planesOp={planesOp}
+            opExtra={opExtra}
+            onUpdateOpExtra={handleUpdateOpExtra}
             onEnviarSheets={() => {
               const p = registros.filter((r) => !r.sync);
               if (!p.length) {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PlanOp, Registro } from '../types';
+import { OpExtra, PlanOp, Registro } from '../types';
 import {
   agrupar,
   agruparReporte,
@@ -15,12 +15,15 @@ import {
 import { descargarXml, xmlEntregas } from '../services/excel';
 import { encolarDel } from '../services/sheets';
 import { EditarStockModal } from './EditarStockModal';
+import { EditarPlantaModal } from './EditarPlantaModal';
 
 interface RegistrosTabProps {
   registros: Registro[];
   onRegistrosChange: (newRegs: Registro[], toSend?: Registro[]) => void;
   nombres: string[];
   planesOp: Record<string, PlanOp>;
+  opExtra?: Record<string, OpExtra>;
+  onUpdateOpExtra?: (op: string, fdesp: string, changes: Partial<OpExtra>) => void;
   onEnviarSheets: () => void;
   onTraerSheets: () => void;
   onBorrarRemoto: (id: string) => void;
@@ -32,6 +35,8 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
   onRegistrosChange,
   nombres,
   planesOp,
+  opExtra = {},
+  onUpdateOpExtra,
   onEnviarSheets,
   onTraerSheets,
   onBorrarRemoto,
@@ -52,7 +57,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
       if (fDesp && (r.fdesp || r.fecha) !== fDesp) return false;
       if (fTurno && r.turno !== fTurno) return false;
       if (fNombre && r.nombre !== fNombre) return false;
-      if (fEstado && estadoReg(r, registros, planesOp) !== fEstado) return false;
+      if (fEstado && estadoReg(r, registros, planesOp, opExtra) !== fEstado) return false;
       if (
         fTexto &&
         `${r.op} ${r.sap || ''} ${r.cliente} ${r.nombre} ${r.descripcion}`
@@ -90,6 +95,55 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
     currentStock: number;
     pedido?: number;
   } | null>(null);
+
+  const [plantaEditModal, setPlantaEditModal] = useState<{
+    op: string;
+    fdesp: string;
+    currentPlanta: number;
+    currentEnProduccion: boolean;
+    pedido?: number;
+    entregado?: number;
+    stock?: number;
+  } | null>(null);
+
+  const handleToggleEnProduccion = (op: string, fdesp: string, checked: boolean) => {
+    if (onUpdateOpExtra) {
+      onUpdateOpExtra(op, fdesp, { enProduccion: checked });
+    }
+    const updatedExtra = {
+      ...opExtra,
+      [`${op.trim().toLowerCase()}|${fdesp}`]: {
+        ...(opExtra[`${op.trim().toLowerCase()}|${fdesp}`] || {}),
+        enProduccion: checked,
+      },
+    };
+    const camb = recalcularEstados(op, fdesp, registros, planesOp, updatedExtra);
+    if (camb.length > 0) {
+      onRegistrosChange(registros, camb);
+    }
+    onToast('ok', checked ? `OP ${op} marcada EN PRODUCCIÓN` : `OP ${op} desmarcada de producción`);
+  };
+
+  const handleSavePlantaModal = (data: { enProduccion: boolean; cantPlanta: number }) => {
+    if (!plantaEditModal) return;
+    const { op, fdesp } = plantaEditModal;
+    if (onUpdateOpExtra) {
+      onUpdateOpExtra(op, fdesp, data);
+    }
+    const updatedExtra = {
+      ...opExtra,
+      [`${op.trim().toLowerCase()}|${fdesp}`]: {
+        ...(opExtra[`${op.trim().toLowerCase()}|${fdesp}`] || {}),
+        ...data,
+      },
+    };
+    const camb = recalcularEstados(op, fdesp, registros, planesOp, updatedExtra);
+    if (camb.length > 0) {
+      onRegistrosChange(registros, camb);
+    }
+    setPlantaEditModal(null);
+    onToast('ok', `Datos de planta para OP ${op} actualizados`);
+  };
 
   const handleGuardarStockEdit = (newStock: number) => {
     if (!stockEditModal) return;
@@ -165,7 +219,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
     });
     updatedRegs = registrosLimpios;
 
-    const camb = recalcularEstados(op, fdesp, updatedRegs, planesOp);
+    const camb = recalcularEstados(op, fdesp, updatedRegs, planesOp, opExtra);
     camb.forEach((x) => {
       if (envio.indexOf(x) < 0) envio.push(x);
     });
@@ -195,14 +249,14 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
   const handleBorrar = (r: Registro) => {
     if (!window.confirm('¿Borrar este registro?')) return;
     const remaining = registros.filter((x) => x.id !== r.id);
-    const cb = recalcularEstados(r.op, r.fdesp, remaining, planesOp);
+    const cb = recalcularEstados(r.op, r.fdesp, remaining, planesOp, opExtra);
     onBorrarRemoto(r.id);
     onRegistrosChange(remaining, cb);
     onToast('ok', 'Registro eliminado');
   };
 
   const handleExportExcel = () => {
-    if (!entregasReales(filtrados).length && !agruparReporte(filtrados, registros, fDesp, planesOp).ops.length) {
+    if (!entregasReales(filtrados).length && !agruparReporte(filtrados, registros, fDesp, planesOp, opExtra).ops.length) {
       onToast('error', 'Nada que exportar');
       return;
     }
@@ -210,13 +264,13 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
       onToast('ok', `Se exporta ${filtrados.length} de ${registros.length} por los filtros activos`);
     }
     const nombreArchivo = `entregas_${hoy()}.xls`;
-    const xml = xmlEntregas(filtrados, registros, fDesp, planesOp);
+    const xml = xmlEntregas(filtrados, registros, fDesp, planesOp, opExtra);
     descargarXml(xml, nombreArchivo, onToast);
   };
 
   const handleAbrirImprimir = () => {
     const ents = entregasReales(filtrados);
-    const g = agruparReporte(filtrados, registros, fDesp, planesOp);
+    const g = agruparReporte(filtrados, registros, fDesp, planesOp, opExtra);
     if (!ents.length && !g.ops.length) {
       onToast('error', 'Nada que imprimir');
       return;
@@ -226,7 +280,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
 
   const ejecutarImpresion = (opts: typeof printOpts) => {
     const ents = entregasReales(filtrados);
-    const g = agruparReporte(filtrados, registros, fDesp, planesOp);
+    const g = agruparReporte(filtrados, registros, fDesp, planesOp, opExtra);
     if (!ents.length && !g.ops.length) {
       onToast('error', 'Nada que imprimir');
       return;
@@ -256,7 +310,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
       const filas = ents.length
         ? ents
             .map((r) => {
-              const st = estadoReg(r, registros, planesOp);
+              const st = estadoReg(r, registros, planesOp, opExtra);
               const n =
                 r.empaque === 'caja'
                   ? r.c === 1
@@ -276,12 +330,14 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
 
     if (opts.resumenOp) {
       const tablaOp =
-        '<h2>Resumen por OP (lista completa, en el orden de la carga)</h2><table><thead><tr><th>Despacho</th><th>OP</th><th>Cliente</th><th>Descripción</th><th>Pedido</th><th>Stock inicial</th><th>Entregado</th><th>Acum. (stock + entreg.)</th><th>Faltante</th><th>Excedente</th><th>Estado</th></tr></thead><tbody>' +
+        '<h2>Resumen por OP (lista completa, en el orden de la carga)</h2><table><thead><tr><th>Despacho</th><th>OP</th><th>Cliente</th><th>Descripción</th><th>Pedido</th><th>Stock inicial</th><th>Entregado</th><th>Acum. (stock + entreg.)</th><th>Faltante</th><th>Excedente</th><th>En planta</th><th>¿En prod.?</th><th>Estado</th></tr></thead><tbody>' +
         g.ops
           .map((o) => {
             const pd = o.pedido - o.acum;
-            const es = estadoDe(o.op, o.fdesp, registros, planesOp);
-            return `<tr><td class='k'>${fcorta(o.fdesp)}</td><td class='k'>${escapeHtml(o.op)}</td><td>${escapeHtml(o.cliente)}</td><td>${escapeHtml(o.desc)}</td><td class='n p'>${o.pedido}</td><td class='n s'>${o.stock || ''}</td><td class='n e'>${o.entF}</td><td class='n'>${o.acum}</td><td class='n'>${Math.max(pd, 0)}</td><td class='n${o.pedido > 0 && pd < 0 ? ' x' : ''}'>${o.pedido > 0 ? Math.max(-pd, 0) : 0}</td><td class='k${es ? ' s-' + es : ''}'>${es}</td></tr>`;
+            const es = estadoDe(o.op, o.fdesp, registros, planesOp, opExtra);
+            const cantPl = o.cantPlanta || 0;
+            const enPr = o.enProduccion ? 'SÍ' : 'NO';
+            return `<tr><td class='k'>${fcorta(o.fdesp)}</td><td class='k'>${escapeHtml(o.op)}</td><td>${escapeHtml(o.cliente)}</td><td>${escapeHtml(o.desc)}</td><td class='n p'>${o.pedido}</td><td class='n s'>${o.stock || ''}</td><td class='n e'>${o.entF}</td><td class='n'>${o.acum}</td><td class='n'>${Math.max(pd, 0)}</td><td class='n${o.pedido > 0 && pd < 0 ? ' x' : ''}'>${o.pedido > 0 ? Math.max(-pd, 0) : 0}</td><td class='n'>${cantPl}</td><td class='k'>${enPr}</td><td class='k${es ? ' s-' + es : ''}'>${es}</td></tr>`;
           })
           .join('') +
         '</tbody></table>';
@@ -328,7 +384,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
     setFTexto('');
   };
 
-  const gSummary = agrupar(filtrados, registros, planesOp);
+  const gSummary = agrupar(filtrados, registros, planesOp, opExtra);
   const totEntregadasSummary = filtrados.reduce(
     (a, r) => a + (esStock(r) ? 0 : r.total || 0),
     0
@@ -396,6 +452,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
               <option value="">Todos</option>
               <option value="COMPLETO">COMPLETO</option>
               <option value="INCOMPLETO">INCOMPLETO</option>
+              <option value="EN PRODUCCION">EN PRODUCCIÓN</option>
             </select>
           </div>
         </div>
@@ -622,6 +679,8 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                         <th className="n">Acumulado</th>
                         <th className="n">Pendiente</th>
                         <th className="n">Excedente</th>
+                        <th className="n">En planta</th>
+                        <th className="k">¿En prod.?</th>
                         <th className="k">Estado</th>
                         <th style={{ textAlign: 'right' }}>Acciones</th>
                       </tr>
@@ -630,6 +689,8 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                       {gSummary.ops.map((o) => {
                         const pd = o.pedido - o.acum;
                         const ok = o.pedido > 0 && pd <= 0;
+                        const enProd = Boolean(o.enProduccion);
+                        const cantPlanta = o.cantPlanta || 0;
                         return (
                           <tr key={o.op + '|' + o.fdesp}>
                             <td className="mono">{fcorta(o.fdesp)}</td>
@@ -676,32 +737,168 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                                 '0'
                               )}
                             </td>
-                            <td className="k">
-                              {o.pedido > 0 && (
-                                <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
-                                  {ok
-                                    ? pd < 0
-                                      ? `COMPLETO (+${-pd})`
-                                      : 'COMPLETO'
-                                    : `Faltan ${pd}`}
-                                </span>
-                              )}
-                            </td>
-                            <td className="actions">
+                            <td className="n">
                               <button
-                                className="stock-btn"
                                 type="button"
+                                className="btn-s"
+                                style={{
+                                  padding: '3px 8px',
+                                  fontSize: '0.82rem',
+                                  fontWeight: 700,
+                                  minHeight: '28px',
+                                  background: cantPlanta > 0 ? 'var(--blue)' : 'var(--field)',
+                                  color: cantPlanta > 0 ? '#fff' : 'var(--muted2)',
+                                  borderColor: cantPlanta > 0 ? 'var(--blue)' : 'var(--inp)',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                }}
                                 onClick={() =>
-                                  setStockEditModal({
+                                  setPlantaEditModal({
                                     op: o.op,
                                     fdesp: o.fdesp,
-                                    currentStock: o.stock || 0,
+                                    currentPlanta: cantPlanta,
+                                    currentEnProduccion: enProd,
                                     pedido: o.pedido,
+                                    entregado: o.ent,
+                                    stock: o.stock,
                                   })
                                 }
+                                title="Clic para editar la cantidad restante en planta"
                               >
-                                ✏️ Stock ({o.stock || 0})
+                                {cantPlanta > 0 ? `🏭 ${cantPlanta} u` : '0 u'}
                               </button>
+                            </td>
+                            <td className="k" style={{ textAlign: 'center' }}>
+                              <label
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  cursor: 'pointer',
+                                  margin: 0,
+                                  fontSize: '0.82rem',
+                                  fontWeight: 600,
+                                  userSelect: 'none',
+                                }}
+                                title="Marcar si esta OP está en producción"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={enProd}
+                                  onChange={(e) => handleToggleEnProduccion(o.op, o.fdesp, e.target.checked)}
+                                  style={{
+                                    width: '18px',
+                                    height: '18px',
+                                    minHeight: '18px',
+                                    cursor: 'pointer',
+                                    accentColor: 'var(--blue)',
+                                  }}
+                                />
+                                <span
+                                  style={{
+                                    color: enProd ? 'var(--blue)' : 'var(--muted)',
+                                    fontWeight: enProd ? 700 : 500,
+                                  }}
+                                >
+                                  {enProd ? 'En prod.' : 'No'}
+                                </span>
+                              </label>
+                            </td>
+                            <td className="k">
+                              {enProd ? (
+                                <div>
+                                  <span className="badge b-ENPRODUCCION">EN PRODUCCIÓN</span>
+                                  {o.pedido > 0 && (
+                                    <div
+                                      style={{
+                                        fontSize: '0.72rem',
+                                        marginTop: '3px',
+                                        fontWeight: 600,
+                                        color: ok ? 'var(--green)' : 'var(--muted)',
+                                      }}
+                                    >
+                                      {ok
+                                        ? pd < 0
+                                          ? `Cubierto (+${-pd})`
+                                          : 'Cubierto'
+                                        : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : o.pedido > 0 ? (
+                                <div>
+                                  <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
+                                    {ok
+                                      ? pd < 0
+                                        ? `COMPLETO (+${-pd})`
+                                        : 'COMPLETO'
+                                      : `Faltan ${pd}`}
+                                  </span>
+                                  {cantPlanta > 0 && !ok && (
+                                    <div
+                                      style={{
+                                        fontSize: '0.72rem',
+                                        marginTop: '3px',
+                                        color: 'var(--blue)',
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      🏭 {cantPlanta} u en planta
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                cantPlanta > 0 && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.76rem',
+                                      color: 'var(--blue)',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    🏭 {cantPlanta} u en planta
+                                  </span>
+                                )
+                              )}
+                            </td>
+                            <td className="actions" style={{ whiteSpace: 'nowrap' }}>
+                              <div style={{ display: 'inline-flex', gap: '4px', justifyContent: 'flex-end' }}>
+                                <button
+                                  className="stock-btn"
+                                  type="button"
+                                  onClick={() =>
+                                    setPlantaEditModal({
+                                      op: o.op,
+                                      fdesp: o.fdesp,
+                                      currentPlanta: cantPlanta,
+                                      currentEnProduccion: enProd,
+                                      pedido: o.pedido,
+                                      entregado: o.ent,
+                                      stock: o.stock,
+                                    })
+                                  }
+                                  title="Editar cantidad en planta y estado de producción"
+                                  style={{
+                                    borderColor: cantPlanta > 0 || enProd ? 'var(--blue)' : undefined,
+                                  }}
+                                >
+                                  🏭 Planta
+                                </button>
+                                <button
+                                  className="stock-btn"
+                                  type="button"
+                                  onClick={() =>
+                                    setStockEditModal({
+                                      op: o.op,
+                                      fdesp: o.fdesp,
+                                      currentStock: o.stock || 0,
+                                      pedido: o.pedido,
+                                    })
+                                  }
+                                >
+                                  ✏️ Stock ({o.stock || 0})
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -956,6 +1153,20 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
           pedido={stockEditModal.pedido}
           onSave={handleGuardarStockEdit}
           onClose={() => setStockEditModal(null)}
+        />
+      )}
+
+      {plantaEditModal && (
+        <EditarPlantaModal
+          op={plantaEditModal.op}
+          fdesp={plantaEditModal.fdesp}
+          currentPlanta={plantaEditModal.currentPlanta}
+          currentEnProduccion={plantaEditModal.currentEnProduccion}
+          pedido={plantaEditModal.pedido}
+          entregado={plantaEditModal.entregado}
+          stock={plantaEditModal.stock}
+          onSave={handleSavePlantaModal}
+          onClose={() => setPlantaEditModal(null)}
         />
       )}
     </div>
