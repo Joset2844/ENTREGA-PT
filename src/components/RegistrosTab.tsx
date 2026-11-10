@@ -478,7 +478,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                     <th>Registro</th>
                     <th>Turno</th>
                     <th>Habilitador</th>
-                    <th>OP</th>
+                    <th className="th-op">OP</th>
                     <th>Cliente</th>
                     <th>SAP / Descripción</th>
                     <th className="n">Pedido</th>
@@ -511,7 +511,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                         <td className="mono">{fcorta(r.fecha)}</td>
                         <td>{r.turno}</td>
                         <td>{r.nombre}</td>
-                        <td>
+                        <td className="td-op op-cell">
                           <span className="op mono">{r.op}</span>
                         </td>
                         <td>{r.cliente}</td>
@@ -613,7 +613,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                     <thead>
                       <tr>
                         <th>Despacho</th>
-                        <th>OP</th>
+                        <th className="th-op">OP</th>
                         <th>Cliente</th>
                         <th>Detalle / Líneas</th>
                         <th className="n">Pedido</th>
@@ -633,7 +633,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                         return (
                           <tr key={o.op + '|' + o.fdesp}>
                             <td className="mono">{fcorta(o.fdesp)}</td>
-                            <td>
+                            <td className="td-op op-cell">
                               <span className="op mono">{o.op}</span>
                             </td>
                             <td>{o.cliente}</td>

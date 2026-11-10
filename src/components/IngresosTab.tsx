@@ -597,7 +597,7 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>OP</th>
+                  <th className="th-op">OP</th>
                   <th>Modelo</th>
                   <th>Cliente</th>
                   <th>SAP</th>
@@ -632,9 +632,10 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
                   return (
                     <tr key={i} className={rowClass}>
                       <td className="idx">{i + 1}</td>
-                      <td>
+                      <td className="td-op">
                         <input
-                          className="mono"
+                          className="mono in-op"
+                          data-f="op"
                           value={r.op}
                           placeholder="OP"
                           onChange={(e) => updateGridRow(i, 'op', e.target.value)}
@@ -985,7 +986,7 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
                   <th>Fecha</th>
                   <th>Turno</th>
                   <th>Habilitador</th>
-                  <th>OP</th>
+                  <th className="th-op">OP</th>
                   <th>Cliente</th>
                   <th>SAP / Descripción</th>
                   <th>Empaque</th>
@@ -1014,7 +1015,7 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
                       <td className="mono">{fcorta(r.fecha)}</td>
                       <td>{r.turno}</td>
                       <td>{r.nombre}</td>
-                      <td>
+                      <td className="td-op op-cell">
                         <span className="op mono">{r.op}</span>
                       </td>
                       <td>{r.cliente}</td>

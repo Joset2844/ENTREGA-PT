@@ -1212,35 +1212,6 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     onToast('ok', `${nuevos.length} registro(s) guardados${errs ? ` · ${errs} con errores pendientes` : ''}`);
   };
 
-  // Quick autofill when clicking "Registrar" on plan table
-  const handleQuickRegisterPlan = (op: string, sap: string) => {
-    let m = op ? buscarCatalogo(op) : null;
-    if (!m && sap) {
-      const o = opsDeSap(sap, catalogo);
-      if (o.length === 1) {
-        m = o[0].m;
-      }
-    }
-    if (m) {
-      aplicarOpForm(m);
-      if (sap) {
-        const i = (m.modelos || []).findIndex(
-          (mo) => String(mo.sap || '').trim().toUpperCase() === String(sap).trim().toUpperCase()
-        );
-        if (i >= 0) {
-          handleSelectModeloForm(i, m);
-        }
-      }
-    } else {
-      setFormOp(op || '');
-      setFormSap(sap || '');
-      setFormDesc(sap ? buscarSap(sap, catalogo, registros) : '');
-      setOpPedidoVista('');
-    }
-
-    onModoRegChange('form');
-    onToast('ok', 'Datos listos, ingresa unidades y cantidad');
-  };
 
   // Sub-metrics for current despacho
   const sub = registros.filter((r) => (r.fdesp || '') === fdesp);
@@ -1348,127 +1319,8 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
         <div id="despachoInfo" className="info">
           Despacho {fcorta(fdesp)}: {sub.length} entrada(s) · {totEntregado} u entregadas
           {totStock ? ` · ${totStock} u de stock inicial` : ''}
-        </div>
-
-        {/* Plans Display */}
-        <div className="plans">
-          {currentPlan && currentPlan.items.length > 0 && (
-            <div>
-              <div className="sec">
-                Lista de despacho {fcorta(fdesp)} ·{' '}
-                {
-                  currentPlan.items.filter((it) => {
-                    const e = sub
-                      .filter((r) => (r.sap || '').toUpperCase() === it.sap.toUpperCase())
-                      .reduce((acc, curr) => acc + (curr.total || 0), 0);
-                    return it.cant - e <= 0;
-                  }).length
-                }
-                /{currentPlan.items.length} SAP completos
-              </div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '6px' }}>
-                Archivo: {currentPlan.archivo || ''}
-              </div>
-              <table className="plan-t">
-                <thead>
-                  <tr>
-                    <th>SAP</th>
-                    <th className="n">Pedido</th>
-                    <th className="n">Entregado</th>
-                    <th className="n">Estado</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentPlan.items.map((it, idx) => {
-                    const e = sub
-                      .filter((r) => (r.sap || '').toUpperCase() === it.sap.toUpperCase())
-                      .reduce((acc, curr) => acc + (curr.total || 0), 0);
-                    const f = it.cant - e;
-                    const cl = f > 0 ? 'plan-pend' : f < 0 ? 'plan-exc' : 'plan-ok';
-                    const et = f > 0 ? `Falta ${f}` : f < 0 ? `Exceso ${-f}` : 'Completo';
-                    return (
-                      <tr key={idx}>
-                        <td className="mono">{it.sap}</td>
-                        <td className="n mono">{it.cant}</td>
-                        <td className="n mono">{e}</td>
-                        <td className={`n ${cl}`}>{et}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn-s"
-                            style={{ padding: '4px 8px', fontSize: '0.72rem' }}
-                            onClick={() => handleQuickRegisterPlan('', it.sap)}
-                          >
-                            Registrar
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {currentPlanOp && currentPlanOp.items.length > 0 && (
-            <div>
-              <div className="sec">
-                Lista por OP {fcorta(fdesp)} ·{' '}
-                {
-                  currentPlanOp.items.filter((it) => {
-                    const e = sub
-                      .filter((r) => r.op.toUpperCase() === it.op.toUpperCase())
-                      .reduce((acc, curr) => acc + (curr.total || 0), 0);
-                    return it.cant - e <= 0;
-                  }).length
-                }
-                /{currentPlanOp.items.length} OP completas
-              </div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginBottom: '6px' }}>
-                Archivo: {currentPlanOp.archivo || ''}
-              </div>
-              <table className="plan-t">
-                <thead>
-                  <tr>
-                    <th>OP</th>
-                    <th className="n">Pedido</th>
-                    <th className="n">Entregado</th>
-                    <th className="n">Estado</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentPlanOp.items.map((it, idx) => {
-                    const e = sub
-                      .filter((r) => r.op.toUpperCase() === it.op.toUpperCase())
-                      .reduce((acc, curr) => acc + (curr.total || 0), 0);
-                    const f = it.cant - e;
-                    const cl = f > 0 ? 'plan-pend' : f < 0 ? 'plan-exc' : 'plan-ok';
-                    const et = f > 0 ? `Falta ${f}` : f < 0 ? `Exceso ${-f}` : 'Completo';
-                    return (
-                      <tr key={idx}>
-                        <td className="mono">{it.op}</td>
-                        <td className="n mono">{it.cant}</td>
-                        <td className="n mono">{e}</td>
-                        <td className={`n ${cl}`}>{et}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn-s"
-                            style={{ padding: '4px 8px', fontSize: '0.72rem' }}
-                            onClick={() => handleQuickRegisterPlan(it.op, '')}
-                          >
-                            Registrar
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {currentPlan ? ` · Lista SAP: ${currentPlan.items.length} items (${currentPlan.archivo || 'cargada'})` : ''}
+          {currentPlanOp ? ` · Lista OP: ${currentPlanOp.items.length} items (${currentPlanOp.archivo || 'cargada'})` : ''}
         </div>
       </div>
 
@@ -1541,7 +1393,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>OP</th>
+                  <th className="th-op">OP</th>
                   <th>Modelo</th>
                   <th>Cliente</th>
                   <th>SAP</th>
@@ -1582,9 +1434,10 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                   return (
                     <tr key={i} className={rowClass}>
                       <td className="idx">{i + 1}</td>
-                      <td>
+                      <td className="td-op">
                         <input
-                          className="mono"
+                          className="mono in-op"
+                          data-f="op"
                           value={r.op}
                           placeholder="OP"
                           onChange={(e) => updateGridRow(i, 'op', e.target.value)}
@@ -1918,7 +1771,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
             <table className="list-table">
               <thead>
                 <tr>
-                  <th>OP</th>
+                  <th className="th-op">OP</th>
                   <th>Cliente</th>
                   <th>Detalle / Líneas</th>
                   <th className="n">Pedido</th>
@@ -1937,7 +1790,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                   const ok = o.pedido > 0 && pd <= 0;
                   return (
                     <tr key={o.op}>
-                      <td>
+                      <td className="td-op op-cell">
                         <span className="op mono">{o.op}</span>
                       </td>
                       <td>{o.cliente}</td>

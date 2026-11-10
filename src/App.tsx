@@ -166,6 +166,15 @@ export const App: React.FC = () => {
   useEffect(() => {
     requestStoragePersistence();
 
+    const isStandalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      Boolean((navigator as any).standalone);
+
+    if (!isStandalone && (window as any).__ip) {
+      installEventRef.current = (window as any).__ip;
+      setCanInstall(true);
+    }
+
     const handleBeforeInstall = (e: any) => {
       e.preventDefault();
       installEventRef.current = e;
@@ -173,15 +182,24 @@ export const App: React.FC = () => {
       setCanInstall(true);
     };
 
+    const handleCanInstallCustom = () => {
+      if ((window as any).__ip && !isStandalone) {
+        installEventRef.current = (window as any).__ip;
+        setCanInstall(true);
+      }
+    };
+
     const handleAppInstalled = () => {
       installEventRef.current = null;
       (window as any).__ip = null;
       setCanInstall(false);
-      toast('ok', 'App instalada');
+      toast('ok', 'App instalada en el dispositivo');
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
     window.addEventListener('appinstalled', handleAppInstalled);
+    window.addEventListener('pwa-can-install', handleCanInstallCustom);
+    window.addEventListener('pwa-installed', handleAppInstalled);
 
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -197,6 +215,8 @@ export const App: React.FC = () => {
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
       window.removeEventListener('appinstalled', handleAppInstalled);
+      window.removeEventListener('pwa-can-install', handleCanInstallCustom);
+      window.removeEventListener('pwa-installed', handleAppInstalled);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       document.removeEventListener('input', handleKeyActivity, true);
@@ -575,10 +595,16 @@ export const App: React.FC = () => {
   const handleInstallClick = () => {
     if (installEventRef.current) {
       installEventRef.current.prompt();
-      installEventRef.current.userChoice.then(() => {
+      installEventRef.current.userChoice.then((choice: any) => {
+        if (choice && choice.outcome === 'accepted') {
+          toast('ok', 'Instalando aplicación...');
+        }
         installEventRef.current = null;
+        (window as any).__ip = null;
         setCanInstall(false);
       });
+    } else {
+      toast('ok', 'Para instalar en Android: abre el menú de Chrome (⋮) y elige "Instalar aplicación" o "Agregar a la pantalla principal".');
     }
   };
 

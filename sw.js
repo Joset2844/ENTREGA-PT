@@ -1,56 +1,129 @@
-/* Service worker de Control de Entregas.
-   - La app (index.html) va primero por red para que siempre veas la última versión; si no hay internet, usa la copia guardada.
-   - Íconos y manifest: copia guardada primero.
-   - Librería de Excel y tipografías: se guardan para poder usarlas sin conexión.
-   - Sheets, Apps Script y los CSV publicados NUNCA se guardan: siempre van directo a la red. */
-var VERSION = "entregas-v2";
-var SHELL = ["./", "index.html", "manifest.json", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/apple-touch-icon.png"];
-var CDN = ["cdnjs.cloudflare.com", "fonts.googleapis.com", "fonts.gstatic.com"];
+/* Service Worker para Control de Entregas */
+const VERSION = 'entregas-v3';
 
-self.addEventListener("install", function (e) {
-  e.waitUntil(
-    caches.open(VERSION).then(function (c) {
-      return Promise.all(SHELL.map(function (u) { return c.add(new Request(u, { cache: "reload" })).catch(function () {}); }));
-    }).then(function () { return self.skipWaiting(); })
+const SHELL = [
+  '/',
+  '/index.html',
+  '/manifest.json',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
+  '/icons/icon-maskable-512x512.png',
+  '/icons/apple-touch-icon.png',
+  '/icons/favicon-32x32.png',
+  '/icon-192.png',
+  '/icon-512.png'
+];
+
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  event.waitUntil(
+    caches.open(VERSION).then((cache) => {
+      return Promise.all(
+        SHELL.map((url) => {
+          return fetch(url, { cache: 'reload' })
+            .then((res) => {
+              if (res && (res.ok || res.type === 'opaque')) {
+                return cache.put(url, res);
+              }
+            })
+            .catch((err) => {
+              console.warn('[SW] Shell cache miss:', url, err);
+            });
+        })
+      );
+    })
   );
 });
 
-self.addEventListener("activate", function (e) {
-  e.waitUntil(
-    caches.keys().then(function (ks) {
-      return Promise.all(ks.filter(function (k) { return k !== VERSION; }).map(function (k) { return caches.delete(k); }));
-    }).then(function () { return self.clients.claim(); })
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => {
+      return Promise.all(
+        keys
+          .filter((key) => key !== VERSION)
+          .map((key) => caches.delete(key))
+      );
+    }).then(() => {
+      return self.clients.claim();
+    })
   );
 });
 
-function guardar(req, res) {
-  if (res && (res.ok || res.type === "opaque")) { var copia = res.clone(); caches.open(VERSION).then(function (c) { c.put(req, copia); }); }
-  return res;
-}
-function redPrimero(req) {
-  return fetch(req).then(function (res) { return guardar(req, res); }).catch(function () {
-    return caches.match(req, { ignoreSearch: true }).then(function (hit) { return hit || caches.match("index.html") || caches.match("./"); });
-  });
-}
-function cachePrimero(req) {
-  return caches.match(req).then(function (hit) { return hit || fetch(req).then(function (res) { return guardar(req, res); }); });
-}
-function rapidoYActualiza(req) {
-  return caches.match(req).then(function (hit) {
-    var red = fetch(req).then(function (res) { return guardar(req, res); }).catch(function () { return hit; });
-    return hit || red;
-  });
-}
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
 
-self.addEventListener("fetch", function (e) {
-  var req = e.request;
-  if (req.method !== "GET") return;
-  var u = new URL(req.url);
-  if (u.origin === self.location.origin) {
-    var esPagina = req.mode === "navigate" || /\/$|\/index\.html$/.test(u.pathname);
-    e.respondWith(esPagina ? redPrimero(req) : cachePrimero(req));
+  const url = new URL(req.url);
+
+  // Skip non-http/https schemes (e.g. chrome-extension:)
+  if (!url.protocol.startsWith('http')) return;
+
+  // Never cache Google Sheets, Apps Script, or live sync endpoints
+  if (
+    url.pathname === '/sw.js' ||
+    url.hostname.includes('script.google.com') ||
+    url.hostname.includes('docs.google.com') ||
+    url.hostname.includes('googleusercontent.com')
+  ) {
     return;
   }
-  if (CDN.indexOf(u.hostname) !== -1) { e.respondWith(rapidoYActualiza(req)); }
-  /* cualquier otro origen (Google Sheets, Apps Script...) no se intercepta */
+
+  // Same-origin navigation requests: Network first, fallback to cached index.html
+  if (req.mode === 'navigate' || (url.origin === self.location.origin && (url.pathname === '/' || url.pathname.endsWith('.html')))) {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res && res.ok) {
+            const clone = res.clone();
+            caches.open(VERSION).then((cache) => cache.put(req, clone));
+          }
+          return res;
+        })
+        .catch(() => {
+          return caches.match(req).then((hit) => {
+            return hit || caches.match('/') || caches.match('/index.html');
+          });
+        })
+    );
+    return;
+  }
+
+  // Same-origin static assets: Cache first, update cache in background
+  if (url.origin === self.location.origin) {
+    event.respondWith(
+      caches.match(req).then((hit) => {
+        if (hit) return hit;
+        return fetch(req).then((res) => {
+          if (res && (res.ok || res.type === 'opaque')) {
+            const clone = res.clone();
+            caches.open(VERSION).then((cache) => cache.put(req, clone));
+          }
+          return res;
+        });
+      })
+    );
+    return;
+  }
+
+  // CDN assets (fonts, SheetJS)
+  if (
+    url.hostname.includes('cdnjs.cloudflare.com') ||
+    url.hostname.includes('fonts.googleapis.com') ||
+    url.hostname.includes('fonts.gstatic.com')
+  ) {
+    event.respondWith(
+      caches.match(req).then((hit) => {
+        const fetchPromise = fetch(req)
+          .then((res) => {
+            if (res && (res.ok || res.type === 'opaque')) {
+              const clone = res.clone();
+              caches.open(VERSION).then((cache) => cache.put(req, clone));
+            }
+            return res;
+          })
+          .catch(() => hit);
+        return hit || fetchPromise;
+      })
+    );
+  }
 });

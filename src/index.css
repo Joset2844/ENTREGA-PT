@@ -580,12 +580,19 @@ input[type="date"] {
 }
 
 .op {
-  font-size: 0.8rem;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  font-weight: 700;
   background: var(--op-bg);
   color: var(--op-tx);
-  padding: 3px 10px;
-  border-radius: 999px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(245, 165, 36, 0.3);
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.02em;
 }
 
 .badge {
@@ -746,6 +753,21 @@ input[type="date"] {
   white-space: nowrap;
 }
 
+.list-table th.th-op,
+.list-table td.td-op,
+.list-table td.op-cell {
+  min-width: 145px;
+  white-space: nowrap !important;
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.list-table td.op-cell .op {
+  display: inline-flex;
+  white-space: nowrap;
+}
+
 .list-table .del-btn {
   background: none;
   border: none;
@@ -895,6 +917,7 @@ input[type="date"] {
 
 .gt {
   width: 100%;
+  min-width: 1340px;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.86rem;
@@ -908,14 +931,22 @@ input[type="date"] {
   color: var(--muted2);
   font-weight: 700;
   text-align: left;
-  padding: 9px 6px;
-  border-bottom: 1px solid var(--inp);
+  padding: 10px 8px;
+  border-bottom: 2px solid var(--inp);
   white-space: nowrap;
   font-size: 0.78rem;
+  letter-spacing: 0.01em;
+}
+
+.gt th.th-op,
+.gt td.td-op {
+  min-width: 155px;
+  width: 165px;
+  white-space: nowrap;
 }
 
 .gt td {
-  padding: 5px 4px;
+  padding: 6px 6px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -929,12 +960,12 @@ input[type="date"] {
 }
 
 .gt td.desc {
-  min-width: 170px;
+  min-width: 180px;
 }
 
 .gt td.sap {
   white-space: nowrap;
-  min-width: 84px;
+  min-width: 96px;
 }
 
 .gt .dash {
@@ -953,8 +984,15 @@ input[type="date"] {
   min-width: 96px;
 }
 
+.gt input.in-op,
 .gt input[data-f="op"] {
-  width: 124px;
+  width: 100% !important;
+  min-width: 145px !important;
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 700;
+  font-size: 0.94rem;
+  letter-spacing: 0.02em;
+  padding: 7px 10px;
 }
 
 .gt input.n {
@@ -1094,6 +1132,6 @@ input[type="date"] {
 
 @media (max-width: 1299px) {
   .gt {
-    min-width: 1280px;
+    min-width: 1340px;
   }
 }
