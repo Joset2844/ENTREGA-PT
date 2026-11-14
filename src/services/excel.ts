@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { CatalogoOp, Ingreso, PlanDespacho, PlanOp, Registro } from '../types';
 import {
   agruparReporte,
+  compararSapConDespacho,
   entregasReales,
   estadoDe,
   estadoReg,
@@ -144,6 +145,19 @@ export function xmlEntregas(
     r1.push('<Row>' + ce('Sin entregas registradas', 'sK', false, 11) + '</Row>');
   }
   ents.forEach((r) => {
+    let st = estadoReg(r, registrosContext, planesOp, opExtra);
+    if (st === 'INCOMPLETO' && r.sap) {
+      const sc = compararSapConDespacho(
+        r.sap,
+        r.fdesp || r.fecha,
+        registrosContext,
+        planes || {},
+        r.op
+      );
+      if (sc && sc.otrasOps.length > 0 && sc.pedidoSap > 0 && sc.acumuladoSap >= sc.pedidoSap) {
+        st = 'COMPLETO';
+      }
+    }
     r1.push(
       '<Row>' +
         ce(fcorta(r.fdesp || r.fecha), 'sK') +
@@ -157,10 +171,7 @@ export function xmlEntregas(
         ce(r.pedido || 0, 'sP', true) +
         ce(r.total || 0, 'sE', true) +
         ce(detalle(r), 'sK') +
-        ce(
-          estadoReg(r, registrosContext, planesOp, opExtra),
-          EST_STYLE[estadoReg(r, registrosContext, planesOp, opExtra)] || 'sK'
-        ) +
+        ce(st, EST_STYLE[st] || 'sK') +
         '</Row>'
     );
   });
@@ -187,9 +198,28 @@ export function xmlEntregas(
   g.ops.forEach((o) => {
     const pd = o.pedido - o.acum;
     const ex = o.pedido > 0 ? Math.max(-pd, 0) : 0;
-    const es = estadoDe(o.op, o.fdesp, registrosContext, planesOp, opExtra);
+    let es = estadoDe(o.op, o.fdesp, registrosContext, planesOp, opExtra);
     const cantPl = o.cantPlanta || 0;
     const enPr = Boolean(o.enProduccion);
+    const sapsDeOp = Object.keys(o.lineas)
+      .map((k) => o.lineas[k].sap)
+      .filter(Boolean)
+      .join(' + ');
+    const sapCheck = sapsDeOp
+      ? compararSapConDespacho(sapsDeOp, o.fdesp, registrosContext, planes || {}, o.op)
+      : null;
+    const sapCubierto = Boolean(
+      sapCheck &&
+        sapCheck.otrasOps.length > 0 &&
+        sapCheck.pedidoSap > 0 &&
+        sapCheck.acumuladoSap >= sapCheck.pedidoSap
+    );
+    const faltVal = sapCubierto ? 0 : Math.max(pd, 0);
+    let esLabel = es;
+    if (sapCubierto && pd > 0 && !enPr) {
+      es = 'COMPLETO';
+      esLabel = 'COMPLETO (SAP)';
+    }
     r2.push(
       '<Row>' +
         ce(fcorta(o.fdesp), 'sK') +
@@ -200,11 +230,11 @@ export function xmlEntregas(
         ce(o.stock || 0, 'sN', true) +
         ce(o.entF, 'sE', true) +
         ce(o.acum, 'sN', true) +
-        ce(Math.max(pd, 0), pd > 0 ? 'sP' : 'sE', true) +
+        ce(faltVal, faltVal > 0 ? 'sP' : 'sE', true) +
         ce(ex, ex > 0 ? 'sX' : 'sN', true) +
         ce(cantPl, cantPl > 0 ? 'sPr' : 'sN', true) +
         ce(enPr ? 'SÍ' : 'NO', enPr ? 'sPr' : 'sK') +
-        ce(es, EST_STYLE[es] || 'sK') +
+        ce(esLabel, EST_STYLE[es] || 'sK') +
         '</Row>'
     );
   });

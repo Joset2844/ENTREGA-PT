@@ -276,16 +276,33 @@ export function compararSapConDespacho(
     });
   }
 
+  // Build fallback SAP lookup per OP (same fdesp first, then any record) so stock records without SAP still match
+  const opSapFallback: Record<string, string> = {};
+  registros.forEach((r) => {
+    const rSap = (r.sap || '').trim();
+    if (!rSap) return;
+    const rOp = (r.op || '').trim().toLowerCase();
+    const rFd = (r.fdesp || r.fecha || '').trim();
+    if (!opSapFallback[rOp + '|' + rFd] || !esStock(r)) {
+      opSapFallback[rOp + '|' + rFd] = rSap;
+    }
+    if (!opSapFallback[rOp] || !esStock(r)) {
+      opSapFallback[rOp] = rSap;
+    }
+  });
+
   // Match against registros in the same despacho
   const opsMap: Record<string, OpSapResumen> = {};
   registros.forEach((r) => {
     const rFd = (r.fdesp || r.fecha || '').trim();
     if (rFd !== targetFd) return;
-    const rSaps = extraerSaps(r.sap);
+    const okKey = r.op.trim().toLowerCase();
+    const effectiveSap =
+      (r.sap || '').trim() || opSapFallback[okKey + '|' + rFd] || opSapFallback[okKey] || '';
+    const rSaps = extraerSaps(effectiveSap);
     const matches = targetSaps.some((ts) => rSaps.includes(ts));
     if (!matches) return;
 
-    const okKey = r.op.trim().toLowerCase();
     if (!opsMap[okKey]) {
       opsMap[okKey] = {
         op: r.op.trim(),
@@ -296,9 +313,7 @@ export function compararSapConDespacho(
       };
     }
     const entry = opsMap[okKey];
-    if (esStock(r)) {
-      entry.stock = Math.max(entry.stock, r.total || 0);
-    } else {
+    if (!esStock(r)) {
       entry.ent += r.total || 0;
     }
     if ((r.pedido || 0) > entry.pedido) {
@@ -306,10 +321,14 @@ export function compararSapConDespacho(
     }
   });
 
-  const opsRelacionadas = Object.values(opsMap).map((o) => ({
-    ...o,
-    acum: o.ent + o.stock,
-  }));
+  const opsRelacionadas = Object.values(opsMap).map((o) => {
+    const stock = stockDe(o.op, targetFd, registros);
+    return {
+      ...o,
+      stock,
+      acum: o.ent + stock,
+    };
+  });
 
   const otrasOps = opsRelacionadas.filter((o) => o.op.toLowerCase() !== opNorm);
   const enRegistrosDesp = opsRelacionadas.length > 0;
@@ -317,7 +336,9 @@ export function compararSapConDespacho(
 
   const entregadoSap = opsRelacionadas.reduce((a, o) => a + o.ent, 0);
   const stockRegistrado = opsRelacionadas.reduce((a, o) => a + o.stock, 0);
-  const acumuladoSap = entregadoSap + stockRegistrado;
+  const stockPlanSinReg =
+    enPlanSap && stockRegistrado === 0 && stockPlan > 0 ? stockPlan : 0;
+  const acumuladoSap = entregadoSap + stockRegistrado + stockPlanSinReg;
   const cubiertoOtrasOps = otrasOps.reduce((a, o) => a + o.acum, 0);
 
   let pedidoSap = pedidoPlan;
@@ -325,8 +346,6 @@ export function compararSapConDespacho(
     pedidoSap = Math.max(...opsRelacionadas.map((o) => o.pedido || 0), 0);
   }
 
-  const stockPlanSinReg =
-    enPlanSap && stockPlan > stockRegistrado ? stockPlan - stockRegistrado : 0;
   const pendienteSap = pedidoSap > 0 ? Math.max(pedidoSap - acumuladoSap, 0) : 0;
   const pendienteOtrasOps = pedidoSap > 0 ? Math.max(pedidoSap - cubiertoOtrasOps, 0) : 0;
   const excedenteSap = pedidoSap > 0 ? Math.max(acumuladoSap - pedidoSap, 0) : 0;
@@ -469,6 +488,32 @@ export interface GrupoSap {
   estado?: string;
 }
 
+function buildOpSapFallback(registros: Registro[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  registros.forEach((r) => {
+    const sap = (r.sap || '').trim();
+    if (!sap) return;
+    const opKey = (r.op || '').trim().toLowerCase();
+    const fd = (r.fdesp || r.fecha || '').trim();
+    if (!opKey) return;
+    if (!map[opKey + '|' + fd] || !esStock(r)) {
+      map[opKey + '|' + fd] = sap;
+    }
+    if (!map[opKey] || !esStock(r)) {
+      map[opKey] = sap;
+    }
+  });
+  return map;
+}
+
+function sapDeRegistro(r: Registro, opSapFallback: Record<string, string>): string {
+  const direct = (r.sap || '').trim();
+  if (direct) return direct;
+  const opKey = (r.op || '').trim().toLowerCase();
+  const fd = (r.fdesp || r.fecha || '').trim();
+  return opSapFallback[opKey + '|' + fd] || opSapFallback[opKey] || '';
+}
+
 export function agrupar(
   rs: Registro[],
   registrosContext: Registro[],
@@ -479,13 +524,16 @@ export function agrupar(
   const ordenO: string[] = [];
   const saps: Record<string, any> = {};
   const ordenS: string[] = [];
+  const opSapFallback = buildOpSapFallback(registrosContext);
 
   rs.forEach((r) => {
-    const fd = r.fdesp || '';
-    const k = r.op.toLowerCase() + '|' + fd;
+    const fd = (r.fdesp || r.fecha || '').trim();
+    const opTrim = (r.op || '').trim();
+    const opKey = opTrim.toLowerCase();
+    const k = opKey + '|' + fd;
     if (!ops[k]) {
       ops[k] = {
-        op: r.op,
+        op: opTrim,
         fdesp: fd,
         cliente: r.cliente,
         pedido: 0,
@@ -503,11 +551,14 @@ export function agrupar(
       o.stock = Math.max(o.stock, r.total || 0);
     }
     if (r.pedido) o.pedido = r.pedido;
-    const pp = pedidoPlanOp(r.op, fd, planesOp);
+    const pp = pedidoPlanOp(opTrim, fd, planesOp);
     if (pp) o.pedido = pp;
 
-    const sk = r.sap || 'd:' + r.descripcion;
-    const L = o.lineas[sk] || (o.lineas[sk] = { sap: r.sap || '', desc: r.descripcion, ent: 0 });
+    const effSap = sapDeRegistro(r, opSapFallback);
+    const sapNorm = effSap.trim().toUpperCase();
+    const sk = sapNorm || 'd:' + (r.descripcion || '').trim();
+    const L = o.lineas[sk] || (o.lineas[sk] = { sap: effSap, desc: r.descripcion, ent: 0 });
+    if (!L.desc && r.descripcion) L.desc = r.descripcion;
     L.ent += tt;
 
     const gk = fd + '|' + sk;
@@ -515,7 +566,7 @@ export function agrupar(
       saps[gk] ||
       (saps[gk] = {
         fdesp: fd,
-        sap: r.sap || '',
+        sap: effSap,
         desc: r.descripcion,
         ent: 0,
         stock: 0,
@@ -523,10 +574,10 @@ export function agrupar(
         ops: {},
         _stockOps: {},
       });
+    if (!S.desc && r.descripcion) S.desc = r.descripcion;
     if (ordenS.indexOf(gk) === -1) ordenS.push(gk);
     S.ent += tt;
     if (esS) {
-      const opKey = r.op.trim().toLowerCase();
       if (!S._stockOps) S._stockOps = {};
       if (!S._stockOps[opKey]) {
         S._stockOps[opKey] = r.total || 0;
@@ -537,11 +588,12 @@ export function agrupar(
       }
     }
     if (r.cliente) S.cli[r.cliente] = 1;
-    S.ops[r.op] = 1;
+    S.ops[opTrim] = 1;
   });
 
   const lo: GrupoOp[] = ordenO.map((k) => {
     const o = ops[k];
+    o.stock = stockDe(o.op, o.fdesp, registrosContext);
     o.acum = acumulado(o.op, o.fdesp, registrosContext);
     const ds: Record<string, number> = {};
     Object.keys(o.lineas).forEach((sk) => {
@@ -574,24 +626,27 @@ export function agruparReporte(
 ) {
   const fds: Record<string, number> = {};
   fl.forEach((r) => {
-    fds[r.fdesp || r.fecha || ''] = 1;
+    fds[(r.fdesp || r.fecha || '').trim()] = 1;
   });
-  if (fDespFiltro) fds[fDespFiltro] = 1;
+  if (fDespFiltro) fds[fDespFiltro.trim()] = 1;
 
-  const base = todosRegistros.filter((r) => fds[r.fdesp || r.fecha || '']);
+  const base = todosRegistros.filter((r) => fds[(r.fdesp || r.fecha || '').trim()]);
   const pos: Record<string, number> = {};
   todosRegistros.forEach((r, i) => {
     pos[r.id] = i;
   });
 
+  const opSapFallback = buildOpSapFallback(todosRegistros);
   const g = agrupar(base, todosRegistros, planesOp, opExtra);
   const eo: Record<string, number> = {};
   const es: Record<string, number> = {};
 
   entregasReales(fl).forEach((r) => {
-    const fd = r.fdesp || '';
-    const ko = r.op.toLowerCase() + '|' + fd;
-    const ks = fd + '|' + (r.sap || 'd:' + r.descripcion);
+    const fd = (r.fdesp || r.fecha || '').trim();
+    const ko = r.op.trim().toLowerCase() + '|' + fd;
+    const effSap = sapDeRegistro(r, opSapFallback);
+    const sk = effSap ? effSap.trim().toUpperCase() : 'd:' + (r.descripcion || '').trim();
+    const ks = fd + '|' + sk;
     eo[ko] = (eo[ko] || 0) + (r.total || 0);
     es[ks] = (es[ks] || 0) + (r.total || 0);
   });
@@ -608,12 +663,15 @@ export function agruparReporte(
   }
 
   g.ops.forEach((o) => {
-    const k = o.op.toLowerCase();
-    const recs = base.filter((r) => r.op.toLowerCase() === k && (r.fdesp || '') === o.fdesp);
+    const k = o.op.trim().toLowerCase();
+    const recs = base.filter(
+      (r) => r.op.trim().toLowerCase() === k && (r.fdesp || r.fecha || '').trim() === o.fdesp
+    );
     const m = meta(recs);
     const sp: Record<string, number> = {};
     recs.forEach((r) => {
-      sp[r.sap || 'd:' + r.descripcion] = 1;
+      const effSap = sapDeRegistro(r, opSapFallback);
+      sp[effSap ? effSap.trim().toUpperCase() : 'd:' + (r.descripcion || '').trim()] = 1;
     });
     o.ord = m.ord;
     o.pos = m.pos;
@@ -625,15 +683,18 @@ export function agruparReporte(
   });
 
   g.saps.forEach((x) => {
-    const kk = x.sap || 'd:' + x.desc;
-    const recs = base.filter(
-      (r) => (r.fdesp || '') === x.fdesp && (r.sap || 'd:' + r.descripcion) === kk
-    );
+    const kk = x.sap ? x.sap.trim().toUpperCase() : 'd:' + (x.desc || '').trim();
+    const recs = base.filter((r) => {
+      if ((r.fdesp || r.fecha || '').trim() !== x.fdesp) return false;
+      const effSap = sapDeRegistro(r, opSapFallback);
+      const rKey = effSap ? effSap.trim().toUpperCase() : 'd:' + (r.descripcion || '').trim();
+      return rKey === kk;
+    });
     const m = meta(recs);
     const opsK: Record<string, number> = {};
     let entSap = 0;
     recs.forEach((r) => {
-      opsK[r.op.toLowerCase()] = 1;
+      opsK[r.op.trim().toLowerCase()] = 1;
       if (!esStock(r)) {
         entSap += r.total || 0;
       }
@@ -642,18 +703,35 @@ export function agruparReporte(
     Object.keys(opsK).forEach((opKey) => {
       stockSap += stockDe(opKey, x.fdesp, todosRegistros);
     });
-    const acum = entSap + stockSap;
+
+    // If SAP dispatch plan defines stock and no stock record exists yet in registros, include it
+    let planSapStock = 0;
+    if (x.sap && planes?.[x.fdesp]?.items) {
+      const targetSaps = extraerSaps(x.sap);
+      const vistosPlan = new Set<string>();
+      planes[x.fdesp].items.forEach((it) => {
+        const s = String(it.sap || '').trim().toUpperCase();
+        if (targetSaps.includes(s) && !vistosPlan.has(s)) {
+          vistosPlan.add(s);
+          planSapStock += it.stock || 0;
+        }
+      });
+    }
+    const stockEfectivo = stockSap > 0 ? stockSap : planSapStock;
+    const acum = entSap + stockEfectivo;
 
     let ped = 0;
     let conj = false;
     let inc = false;
     let comp = false;
+    let enProd = false;
 
     Object.keys(opsK).forEach((k) => {
-      const o = g.ops.find((q) => q.op.toLowerCase() === k && q.fdesp === x.fdesp);
+      const o = g.ops.find((q) => q.op.trim().toLowerCase() === k && q.fdesp === x.fdesp);
       if (!o) return;
       if (o.nsap && o.nsap > 1) conj = true;
       else ped += o.pedido;
+      if (o.enProduccion) enProd = true;
       const e = estadoDe(o.op, o.fdesp, todosRegistros, planesOp, opExtra);
       if (e === 'INCOMPLETO') inc = true;
       if (e === 'COMPLETO') comp = true;
@@ -670,6 +748,7 @@ export function agruparReporte(
     x.ord = m.ord;
     x.pos = m.pos;
     x.entF = es[x.fdesp + '|' + kk] || 0;
+    x.stock = stockEfectivo;
     x.acum = acum;
     x.conj = conj;
 
@@ -677,12 +756,21 @@ export function agruparReporte(
       x.pedido = null;
       x.falt = null;
       x.exc = null;
-      x.estado = inc ? 'INCOMPLETO' : comp ? 'COMPLETO' : '';
+      x.estado = inc ? 'INCOMPLETO' : enProd ? 'EN PRODUCCION' : comp ? 'COMPLETO' : '';
     } else {
       x.pedido = ped;
       x.falt = Math.max(ped - acum, 0);
       x.exc = ped > 0 ? Math.max(acum - ped, 0) : 0;
-      x.estado = ped > 0 ? (acum >= ped ? 'COMPLETO' : 'INCOMPLETO') : '';
+      x.estado =
+        ped > 0
+          ? acum >= ped
+            ? 'COMPLETO'
+            : enProd
+            ? 'EN PRODUCCION'
+            : 'INCOMPLETO'
+          : enProd
+          ? 'EN PRODUCCION'
+          : '';
     }
   });
 

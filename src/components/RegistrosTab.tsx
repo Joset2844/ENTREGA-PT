@@ -200,6 +200,9 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
       const ref = updatedRegs.find(
         (x) => x.op.trim().toLowerCase() === q && (x.fdesp || x.fecha || '') === fdesp
       );
+      const anyRef = ref?.sap
+        ? ref
+        : updatedRegs.find((x) => x.op.trim().toLowerCase() === q && x.sap) || ref;
       const newRec: Registro = {
         id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
         fecha: ref?.fecha || hoy(),
@@ -207,9 +210,9 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
         turno: ref?.turno || 'Día',
         nombre: ref?.nombre || 'Almacén',
         op: ref?.op || op,
-        sap: ref?.sap || '',
-        descripcion: ref?.descripcion || '',
-        cliente: ref?.cliente || '',
+        sap: ref?.sap || anyRef?.sap || '',
+        descripcion: ref?.descripcion || anyRef?.descripcion || '',
+        cliente: ref?.cliente || anyRef?.cliente || '',
         pedido: ref?.pedido || pedido || 0,
         empaque: 'stock',
         u: newStock,
@@ -355,7 +358,14 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
       const filas = ents.length
         ? ents
             .map((r) => {
-              const st = estadoReg(r, registros, planesOp, opExtra);
+              let st = estadoReg(r, registros, planesOp, opExtra);
+              if (st === 'INCOMPLETO' && r.sap) {
+                const sc = compararSapConDespacho(r.sap, r.fdesp || r.fecha, registros, planes, r.op);
+                if (sc && sc.otrasOps.length > 0 && sc.pedidoSap > 0 && sc.acumuladoSap >= sc.pedidoSap) {
+                  st = 'COMPLETO';
+                }
+              }
+              const stClass = st ? 's-' + st.replace(/\s+/g, '') : '';
               const n =
                 r.empaque === 'caja'
                   ? r.c === 1
@@ -365,7 +375,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                   ? 'paquete'
                   : 'paquetes';
               const det = `${r.c} ${n} × ${r.u}`;
-              return `<tr><td class='k'>${fcorta(r.fdesp || r.fecha)}</td><td class='k'>${fcorta(r.fecha)}</td><td class='k'>${escapeHtml(r.turno)}</td><td>${escapeHtml(r.nombre)}</td><td class='k'>${escapeHtml(r.op)}</td><td class='k'>${escapeHtml(r.sap || '')}</td><td>${escapeHtml(r.descripcion)}</td><td>${escapeHtml(r.cliente)}</td><td class='n p'>${r.pedido || 0}</td><td class='n e'>${r.total || 0}</td><td class='k'>${escapeHtml(det)}</td><td class='k ${st ? 's-' + st : ''}'>${escapeHtml(st)}</td></tr>`;
+              return `<tr><td class='k'>${fcorta(r.fdesp || r.fecha)}</td><td class='k'>${fcorta(r.fecha)}</td><td class='k'>${escapeHtml(r.turno)}</td><td>${escapeHtml(r.nombre)}</td><td class='k'>${escapeHtml(r.op)}</td><td class='k'>${escapeHtml(r.sap || '')}</td><td>${escapeHtml(r.descripcion)}</td><td>${escapeHtml(r.cliente)}</td><td class='n p'>${r.pedido || 0}</td><td class='n e'>${r.total || 0}</td><td class='k'>${escapeHtml(det)}</td><td class='k ${stClass}'>${escapeHtml(st)}</td></tr>`;
             })
             .join('')
         : "<tr><td colspan='12' class='k'>Sin entregas registradas</td></tr>";
@@ -379,10 +389,31 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
         g.ops
           .map((o) => {
             const pd = o.pedido - o.acum;
-            const es = estadoDe(o.op, o.fdesp, registros, planesOp, opExtra);
+            let es = estadoDe(o.op, o.fdesp, registros, planesOp, opExtra);
             const cantPl = o.cantPlanta || 0;
             const enPr = o.enProduccion ? 'SÍ' : 'NO';
-            return `<tr><td class='k'>${fcorta(o.fdesp)}</td><td class='k'>${escapeHtml(o.op)}</td><td>${escapeHtml(o.cliente)}</td><td>${escapeHtml(o.desc)}</td><td class='n p'>${o.pedido}</td><td class='n s'>${o.stock || ''}</td><td class='n e'>${o.entF}</td><td class='n'>${o.acum}</td><td class='n'>${Math.max(pd, 0)}</td><td class='n${o.pedido > 0 && pd < 0 ? ' x' : ''}'>${o.pedido > 0 ? Math.max(-pd, 0) : 0}</td><td class='n'>${cantPl}</td><td class='k'>${enPr}</td><td class='k${es ? ' s-' + es : ''}'>${es}</td></tr>`;
+            const sapsDeOp = Object.keys(o.lineas)
+              .map((k) => o.lineas[k].sap)
+              .filter(Boolean)
+              .join(' + ');
+            const sapCheck = sapsDeOp
+              ? compararSapConDespacho(sapsDeOp, o.fdesp, registros, planes, o.op)
+              : null;
+            const sapCompartido = Boolean(sapCheck && sapCheck.otrasOps.length > 0);
+            const sapCubierto = Boolean(
+              sapCompartido && sapCheck!.pedidoSap > 0 && sapCheck!.acumuladoSap >= sapCheck!.pedidoSap
+            );
+            const faltVal = sapCubierto ? 0 : Math.max(pd, 0);
+            let esLabel = es;
+            if (sapCubierto && pd > 0 && !o.enProduccion) {
+              es = 'COMPLETO';
+              esLabel = `COMPLETO (SAP)`;
+            }
+            const esClass = es ? ' s-' + es.replace(/\s+/g, '') : '';
+            const acumCell = sapCompartido
+              ? `${o.acum}<br><span style='font-size:8px;font-weight:400;color:#2B6CB0'>SAP: ${sapCheck!.acumuladoSap}/${sapCheck!.pedidoSap || o.pedido}</span>`
+              : `${o.acum}`;
+            return `<tr><td class='k'>${fcorta(o.fdesp)}</td><td class='k'>${escapeHtml(o.op)}</td><td>${escapeHtml(o.cliente)}</td><td>${escapeHtml(o.desc)}</td><td class='n p'>${o.pedido}</td><td class='n s'>${o.stock || ''}</td><td class='n e'>${o.entF}</td><td class='n'>${acumCell}</td><td class='n'>${faltVal}</td><td class='n${o.pedido > 0 && pd < 0 ? ' x' : ''}'>${o.pedido > 0 ? Math.max(-pd, 0) : 0}</td><td class='n'>${cantPl}</td><td class='k'>${enPr}</td><td class='k${esClass}'>${escapeHtml(esLabel)}</td></tr>`;
           })
           .join('') +
         '</tbody></table>';
@@ -394,7 +425,8 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
         '<h2>Resumen por SAP (lista completa, en el orden de la carga)</h2><table><thead><tr><th>Despacho</th><th>SAP</th><th>Descripción</th><th>Cliente</th><th>Pedido</th><th>Stock inicial</th><th>Entregado</th><th>Acum. (stock + entreg.)</th><th>Faltante</th><th>Excedente</th><th>Estado</th><th>OP</th></tr></thead><tbody>' +
         g.saps
           .map((x) => {
-            return `<tr><td class='k'>${fcorta(x.fdesp)}</td><td class='k'>${escapeHtml(x.sap || '')}</td><td>${escapeHtml(x.desc)}</td><td>${escapeHtml(x.cliente)}</td><td class='n p'>${x.conj ? 'CONJUNTO OP' : x.pedido}</td><td class='n s'>${x.stock || ''}</td><td class='n e'>${x.entF}</td><td class='n'>${x.acum}</td><td class='n'>${x.conj ? '—' : x.falt}</td><td class='n${!x.conj && (x.exc ?? 0) > 0 ? ' x' : ''}'>${x.conj ? '—' : x.exc}</td><td class='k${x.estado ? ' s-' + x.estado : ''}'>${x.estado || ''}</td><td>${escapeHtml(Object.keys(x.ops).join(', '))}</td></tr>`;
+            const stClass = x.estado ? ' s-' + x.estado.replace(/\s+/g, '') : '';
+            return `<tr><td class='k'>${fcorta(x.fdesp)}</td><td class='k'>${escapeHtml(x.sap || '')}</td><td>${escapeHtml(x.desc)}</td><td>${escapeHtml(x.cliente)}</td><td class='n p'>${x.conj ? 'CONJUNTO OP' : x.pedido}</td><td class='n s'>${x.stock || ''}</td><td class='n e'>${x.entF}</td><td class='n'>${x.acum}</td><td class='n'>${x.conj ? '—' : x.falt}</td><td class='n${!x.conj && (x.exc ?? 0) > 0 ? ' x' : ''}'>${x.conj ? '—' : x.exc}</td><td class='k${stClass}'>${x.estado || ''}</td><td>${escapeHtml(Object.keys(x.ops).join(', '))}</td></tr>`;
           })
           .join('') +
         '</tbody></table>';
@@ -737,6 +769,19 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                         const ok = o.pedido > 0 && pd <= 0;
                         const enProd = Boolean(o.enProduccion);
                         const cantPlanta = o.cantPlanta || 0;
+                        const sapsDeOp = Object.keys(o.lineas)
+                          .map((k) => o.lineas[k].sap)
+                          .filter(Boolean)
+                          .join(' + ');
+                        const sapCheck = sapsDeOp
+                          ? compararSapConDespacho(sapsDeOp, o.fdesp, registros, planes, o.op)
+                          : null;
+                        const sapCompartido = Boolean(sapCheck && sapCheck.otrasOps.length > 0);
+                        const sapCubiertoPorOtras = Boolean(
+                          sapCompartido &&
+                            sapCheck!.pedidoSap > 0 &&
+                            sapCheck!.acumuladoSap >= sapCheck!.pedidoSap
+                        );
                         return (
                           <tr key={o.op + '|' + o.fdesp}>
                             <td className="mono">{fcorta(o.fdesp)}</td>
@@ -770,9 +815,22 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                             </td>
                             <td className="n mono">
                               <strong>{o.acum} u</strong>
+                              {sapCompartido && (
+                                <div style={{ fontSize: '0.7rem', color: 'var(--blue)', fontWeight: 600 }}>
+                                  SAP: {sapCheck!.acumuladoSap}/{sapCheck!.pedidoSap || o.pedido} u
+                                </div>
+                              )}
                             </td>
                             <td className="n mono">
-                              {Math.max(pd, 0) > 0 ? `${Math.max(pd, 0)} u` : '0'}
+                              {sapCubiertoPorOtras && pd > 0 ? (
+                                <span style={{ color: 'var(--green)', fontWeight: 700 }} title="Cubierto entre OPs del mismo SAP">
+                                  0 (SAP)
+                                </span>
+                              ) : Math.max(pd, 0) > 0 ? (
+                                `${Math.max(pd, 0)} u`
+                              ) : (
+                                '0'
+                              )}
                             </td>
                             <td className="n mono">
                               {pd < 0 && o.pedido > 0 ? (
@@ -851,93 +909,76 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                               </label>
                             </td>
                             <td className="k">
-                              {(() => {
-                                const sapsDeOp = Object.keys(o.lineas)
-                                  .map((k) => o.lineas[k].sap)
-                                  .filter(Boolean)
-                                  .join(' + ');
-                                const sapCheck = sapsDeOp
-                                  ? compararSapConDespacho(sapsDeOp, o.fdesp, registros, planes, o.op)
-                                  : null;
-                                const sapCubiertoPorOtras =
-                                  sapCheck &&
-                                  sapCheck.otrasOps.length > 0 &&
-                                  sapCheck.pedidoSap > 0 &&
-                                  sapCheck.acumuladoSap >= sapCheck.pedidoSap;
-
-                                return (
-                                  <>
-                                    {enProd ? (
-                                      <div>
-                                        <span className="badge b-ENPRODUCCION">EN PRODUCCIÓN</span>
-                                        {o.pedido > 0 && (
-                                          <div
-                                            style={{
-                                              fontSize: '0.72rem',
-                                              marginTop: '3px',
-                                              fontWeight: 600,
-                                              color: ok ? 'var(--green)' : 'var(--muted)',
-                                            }}
-                                          >
-                                            {ok
-                                              ? pd < 0
-                                                ? `Cubierto (+${-pd})`
-                                                : 'Cubierto'
-                                              : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ) : o.pedido > 0 ? (
-                                      <div>
-                                        <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
-                                          {ok
-                                            ? pd < 0
-                                              ? `COMPLETO (+${-pd})`
-                                              : 'COMPLETO'
-                                            : `Faltan ${pd}`}
-                                        </span>
-                                        {cantPlanta > 0 && !ok && (
-                                          <div
-                                            style={{
-                                              fontSize: '0.72rem',
-                                              marginTop: '3px',
-                                              color: 'var(--blue)',
-                                              fontWeight: 600,
-                                            }}
-                                          >
-                                            🏭 {cantPlanta} u en planta
-                                          </div>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      cantPlanta > 0 && (
-                                        <span
-                                          style={{
-                                            fontSize: '0.76rem',
-                                            color: 'var(--blue)',
-                                            fontWeight: 600,
-                                          }}
-                                        >
-                                          🏭 {cantPlanta} u en planta
-                                        </span>
-                                      )
-                                    )}
-                                    {sapCubiertoPorOtras && !ok && (
-                                      <div
-                                        style={{
-                                          fontSize: '0.7rem',
-                                          marginTop: '3px',
-                                          color: 'var(--green)',
-                                          fontWeight: 700,
-                                        }}
-                                        title={`Completado junto con ${sapCheck!.otrasOps.map((x) => x.op).join(', ')}`}
-                                      >
-                                        ✓ SAP cubierto ({sapCheck!.acumuladoSap}/{sapCheck!.pedidoSap} u)
-                                      </div>
-                                    )}
-                                  </>
-                                );
-                              })()}
+                              {enProd ? (
+                                <div>
+                                  <span className="badge b-ENPRODUCCION">EN PRODUCCIÓN</span>
+                                  {o.pedido > 0 && (
+                                    <div
+                                      style={{
+                                        fontSize: '0.72rem',
+                                        marginTop: '3px',
+                                        fontWeight: 600,
+                                        color: ok ? 'var(--green)' : 'var(--muted)',
+                                      }}
+                                    >
+                                      {ok
+                                        ? pd < 0
+                                          ? `Cubierto (+${-pd})`
+                                          : 'Cubierto'
+                                        : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : o.pedido > 0 ? (
+                                <div>
+                                  <span className={`badge ${ok || sapCubiertoPorOtras ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
+                                    {ok
+                                      ? pd < 0
+                                        ? `COMPLETO (+${-pd})`
+                                        : 'COMPLETO'
+                                      : sapCubiertoPorOtras
+                                      ? 'COMPLETO (SAP)'
+                                      : `Faltan ${pd}`}
+                                  </span>
+                                  {cantPlanta > 0 && !ok && !sapCubiertoPorOtras && (
+                                    <div
+                                      style={{
+                                        fontSize: '0.72rem',
+                                        marginTop: '3px',
+                                        color: 'var(--blue)',
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      🏭 {cantPlanta} u en planta
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                cantPlanta > 0 && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.76rem',
+                                      color: 'var(--blue)',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    🏭 {cantPlanta} u en planta
+                                  </span>
+                                )
+                              )}
+                              {sapCubiertoPorOtras && !ok && (
+                                <div
+                                  style={{
+                                    fontSize: '0.7rem',
+                                    marginTop: '3px',
+                                    color: 'var(--green)',
+                                    fontWeight: 700,
+                                  }}
+                                  title={`Completado junto con ${sapCheck!.otrasOps.map((x) => x.op).join(', ')}`}
+                                >
+                                  ✓ SAP cubierto ({sapCheck!.acumuladoSap}/{sapCheck!.pedidoSap} u)
+                                </div>
+                              )}
                             </td>
                             <td className="actions" style={{ whiteSpace: 'nowrap' }}>
                               <div style={{ display: 'inline-flex', gap: '4px', justifyContent: 'flex-end' }}>

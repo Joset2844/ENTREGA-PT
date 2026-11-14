@@ -264,16 +264,21 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       const ref = updatedRegs.find(
         (x) => x.op.trim().toLowerCase() === q && (x.fdesp || x.fecha || '') === modalFd
       );
+      const catOp = buscarCatalogo(op);
+      const anyRef = ref?.sap
+        ? ref
+        : updatedRegs.find((x) => x.op.trim().toLowerCase() === q && x.sap) || ref;
+      const fallbackSap = ref?.sap || anyRef?.sap || sapsDeCatalogoOp(catOp).join(' + ') || '';
       const newRec: Registro = {
         id: Date.now() + '-' + Math.random().toString(36).slice(2, 6),
         fecha: ref?.fecha || fecha,
         fdesp: modalFd,
         turno: ref?.turno || turno,
         nombre: ref?.nombre || nombre || 'Almacén',
-        op: ref?.op || op,
-        sap: ref?.sap || '',
-        descripcion: ref?.descripcion || '',
-        cliente: ref?.cliente || '',
+        op: ref?.op || catOp?.op || op,
+        sap: fallbackSap,
+        descripcion: ref?.descripcion || anyRef?.descripcion || catOp?.descripcion || '',
+        cliente: ref?.cliente || anyRef?.cliente || catOp?.cliente || '',
         pedido: ref?.pedido || pedido || 0,
         empaque: 'stock',
         u: newStock,
@@ -991,6 +996,9 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
         prim.total = stock;
         prim.c = 1;
         prim.pedido = q || prim.pedido;
+        if (!prim.sap && candidate.sap) prim.sap = candidate.sap;
+        if (!prim.descripcion && candidate.desc) prim.descripcion = candidate.desc;
+        if (!prim.cliente && candidate.cliente) prim.cliente = candidate.cliente;
         prim.sync = false;
         if (envio.indexOf(prim) < 0) envio.push(prim);
 
@@ -1563,7 +1571,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
 
 
   // Sub-metrics for current despacho
-  const sub = registros.filter((r) => (r.fdesp || '') === fdesp);
+  const sub = registros.filter((r) => (r.fdesp || r.fecha || '').trim() === fdesp);
   const totEntregado = sub.reduce(
     (a, r) => a + (esStock(r) ? 0 : r.total || 0),
     0
@@ -2371,6 +2379,19 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                   const ok = o.pedido > 0 && pd <= 0;
                   const enProd = Boolean(o.enProduccion);
                   const cantPlanta = o.cantPlanta || 0;
+                  const sapsDeOp = Object.keys(o.lineas)
+                    .map((k) => o.lineas[k].sap)
+                    .filter(Boolean)
+                    .join(' + ');
+                  const sapCheck = sapsDeOp
+                    ? compararSapConDespacho(sapsDeOp, o.fdesp, registros, planes, o.op)
+                    : null;
+                  const sapCompartido = Boolean(sapCheck && sapCheck.otrasOps.length > 0);
+                  const sapCubiertoPorOtras = Boolean(
+                    sapCompartido &&
+                      sapCheck!.pedidoSap > 0 &&
+                      sapCheck!.acumuladoSap >= sapCheck!.pedidoSap
+                  );
                   return (
                     <tr key={o.op}>
                       <td className="td-op op-cell">
@@ -2403,9 +2424,22 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                       </td>
                       <td className="n mono">
                         <strong>{o.acum} u</strong>
+                        {sapCompartido && (
+                          <div style={{ fontSize: '0.7rem', color: 'var(--blue)', fontWeight: 600 }}>
+                            SAP: {sapCheck!.acumuladoSap}/{sapCheck!.pedidoSap || o.pedido} u
+                          </div>
+                        )}
                       </td>
                       <td className="n mono">
-                        {Math.max(pd, 0) > 0 ? `${Math.max(pd, 0)} u` : '0'}
+                        {sapCubiertoPorOtras && pd > 0 ? (
+                          <span style={{ color: 'var(--green)', fontWeight: 700 }} title="Cubierto entre OPs del mismo SAP">
+                            0 (SAP)
+                          </span>
+                        ) : Math.max(pd, 0) > 0 ? (
+                          `${Math.max(pd, 0)} u`
+                        ) : (
+                          '0'
+                        )}
                       </td>
                       <td className="n mono">
                         {pd < 0 && o.pedido > 0 ? (
@@ -2484,93 +2518,76 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                         </label>
                       </td>
                       <td className="k">
-                        {(() => {
-                          const sapsDeOp = Object.keys(o.lineas)
-                            .map((k) => o.lineas[k].sap)
-                            .filter(Boolean)
-                            .join(' + ');
-                          const sapCheck = sapsDeOp
-                            ? compararSapConDespacho(sapsDeOp, o.fdesp, registros, planes, o.op)
-                            : null;
-                          const sapCubiertoPorOtras =
-                            sapCheck &&
-                            sapCheck.otrasOps.length > 0 &&
-                            sapCheck.pedidoSap > 0 &&
-                            sapCheck.acumuladoSap >= sapCheck.pedidoSap;
-
-                          return (
-                            <>
-                              {enProd ? (
-                                <div>
-                                  <span className="badge b-ENPRODUCCION">EN PRODUCCIÓN</span>
-                                  {o.pedido > 0 && (
-                                    <div
-                                      style={{
-                                        fontSize: '0.72rem',
-                                        marginTop: '3px',
-                                        fontWeight: 600,
-                                        color: ok ? 'var(--green)' : 'var(--muted)',
-                                      }}
-                                    >
-                                      {ok
-                                        ? pd < 0
-                                          ? `Cubierto (+${-pd})`
-                                          : 'Cubierto'
-                                        : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
-                                    </div>
-                                  )}
-                                </div>
-                              ) : o.pedido > 0 ? (
-                                <div>
-                                  <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
-                                    {ok
-                                      ? pd < 0
-                                        ? `COMPLETO (+${-pd})`
-                                        : 'COMPLETO'
-                                      : `Faltan ${pd}`}
-                                  </span>
-                                  {cantPlanta > 0 && !ok && (
-                                    <div
-                                      style={{
-                                        fontSize: '0.72rem',
-                                        marginTop: '3px',
-                                        color: 'var(--blue)',
-                                        fontWeight: 600,
-                                      }}
-                                    >
-                                      🏭 {cantPlanta} u en planta
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                cantPlanta > 0 && (
-                                  <span
-                                    style={{
-                                      fontSize: '0.76rem',
-                                      color: 'var(--blue)',
-                                      fontWeight: 600,
-                                    }}
-                                  >
-                                    🏭 {cantPlanta} u en planta
-                                  </span>
-                                )
-                              )}
-                              {sapCubiertoPorOtras && !ok && (
-                                <div
-                                  style={{
-                                    fontSize: '0.7rem',
-                                    marginTop: '3px',
-                                    color: 'var(--green)',
-                                    fontWeight: 700,
-                                  }}
-                                  title={`Completado junto con ${sapCheck!.otrasOps.map((x) => x.op).join(', ')}`}
-                                >
-                                  ✓ SAP cubierto ({sapCheck!.acumuladoSap}/{sapCheck!.pedidoSap} u)
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
+                        {enProd ? (
+                          <div>
+                            <span className="badge b-ENPRODUCCION">EN PRODUCCIÓN</span>
+                            {o.pedido > 0 && (
+                              <div
+                                style={{
+                                  fontSize: '0.72rem',
+                                  marginTop: '3px',
+                                  fontWeight: 600,
+                                  color: ok ? 'var(--green)' : 'var(--muted)',
+                                }}
+                              >
+                                {ok
+                                  ? pd < 0
+                                    ? `Cubierto (+${-pd})`
+                                    : 'Cubierto'
+                                  : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
+                              </div>
+                            )}
+                          </div>
+                        ) : o.pedido > 0 ? (
+                          <div>
+                            <span className={`badge ${ok || sapCubiertoPorOtras ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
+                              {ok
+                                ? pd < 0
+                                  ? `COMPLETO (+${-pd})`
+                                  : 'COMPLETO'
+                                : sapCubiertoPorOtras
+                                ? 'COMPLETO (SAP)'
+                                : `Faltan ${pd}`}
+                            </span>
+                            {cantPlanta > 0 && !ok && !sapCubiertoPorOtras && (
+                              <div
+                                style={{
+                                  fontSize: '0.72rem',
+                                  marginTop: '3px',
+                                  color: 'var(--blue)',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                🏭 {cantPlanta} u en planta
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          cantPlanta > 0 && (
+                            <span
+                              style={{
+                                fontSize: '0.76rem',
+                                color: 'var(--blue)',
+                                fontWeight: 600,
+                              }}
+                            >
+                              🏭 {cantPlanta} u en planta
+                            </span>
+                          )
+                        )}
+                        {sapCubiertoPorOtras && !ok && (
+                          <div
+                            style={{
+                              fontSize: '0.7rem',
+                              marginTop: '3px',
+                              color: 'var(--green)',
+                              fontWeight: 700,
+                            }}
+                            title={`Completado junto con ${sapCheck!.otrasOps.map((x) => x.op).join(', ')}`}
+                          >
+                            ✓ SAP cubierto ({sapCheck!.acumuladoSap}/{sapCheck!.pedidoSap} u)
+                          </div>
+                        )}
                       </td>
                       <td className="actions" style={{ whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'inline-flex', gap: '4px', justifyContent: 'flex-end' }}>
