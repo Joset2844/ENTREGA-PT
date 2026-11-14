@@ -56,6 +56,7 @@ export interface Ingreso {
 export interface GridRow {
   op: string;
   mod: string;
+  sap?: string;
   pedido: string;
   emp: string;
   u: string;

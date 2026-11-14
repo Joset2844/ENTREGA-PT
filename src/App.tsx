@@ -673,6 +673,7 @@ export const App: React.FC = () => {
             onModoRegChange={setModoReg}
             opExtra={opExtra}
             onUpdateOpExtra={handleUpdateOpExtra}
+            onBorrarRemoto={handleBorrarRemotoRegistro}
             onToast={toast}
           />
         )}
@@ -682,6 +683,7 @@ export const App: React.FC = () => {
             registros={registros}
             onRegistrosChange={handleRegistrosChange}
             nombres={nombres}
+            planes={planes}
             planesOp={planesOp}
             opExtra={opExtra}
             onUpdateOpExtra={handleUpdateOpExtra}

@@ -45,25 +45,25 @@ export function difDias(f: string): number {
 }
 
 export function avisoFecha(f: string, nom: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(f || '')) return `La fecha de ${nom} no es válida`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f || '')) return `La fecha de ${nom} no tiene un formato válido (AAAA-MM-DD)`;
   const d = difDias(f);
-  if (d > LIM.fechaFut) return `La fecha de ${nom} (${fcorta(f)}) está ${d} días en el futuro`;
-  if (d < -LIM.fechaPas) return `La fecha de ${nom} (${fcorta(f)}) es de hace ${-d} días`;
+  if (d > LIM.fechaFut) return `La fecha de ${nom} (${fcorta(f)}) está programada para dentro de ${d} días`;
+  if (d < -LIM.fechaPas) return `La fecha de ${nom} (${fcorta(f)}) corresponde a hace ${-d} días`;
   return '';
 }
 
 export function avisoCant(u: number, c: number): string[] {
   const w: string[] = [];
-  if (u > LIM.unid) w.push(`Unidades por empaque muy alta (${u})`);
-  if (c > LIM.cant) w.push(`Cantidad de empaques muy alta (${c})`);
-  if (u * c > LIM.total) w.push(`Total muy alto (${u * c} u)`);
+  if (u > LIM.unid) w.push(`Cantidad de unidades por empaque inusualmente alta (${u} u)`);
+  if (c > LIM.cant) w.push(`Cantidad de empaques inusualmente alta (${c} empaques)`);
+  if (u * c > LIM.total) w.push(`Total calculado inusualmente alto (${u * c} unidades)`);
   return w;
 }
 
 export function confirmarAvisos(w: string[]): boolean {
   const clean = w.filter(Boolean);
   if (!clean.length) return true;
-  return window.confirm(`Revisa antes de guardar:\n\n• ${clean.join('\n• ')}\n\n¿Guardar de todas formas?`);
+  return window.confirm(`Por favor verifica antes de guardar:\n\n• ${clean.join('\n• ')}\n\n¿Deseas continuar y guardar de todas formas?`);
 }
 
 export function esStock(r: Partial<Registro> | undefined): boolean {
@@ -183,14 +183,172 @@ export function pedidoPlanOp(op: string, fd: string, planesOp: Record<string, Pl
   return 0;
 }
 
+export function extraerSaps(sapStr: string | undefined): string[] {
+  return String(sapStr || '')
+    .split(/[+,;/]+/)
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+export function sapsDeCatalogoOp(m: CatalogoOp | null | undefined): string[] {
+  if (!m) return [];
+  const set = new Set<string>();
+  if (m.sap) extraerSaps(m.sap).forEach((s) => set.add(s));
+  (m.modelos || []).forEach((mo) => {
+    if (mo.sap) extraerSaps(mo.sap).forEach((s) => set.add(s));
+  });
+  return Array.from(set);
+}
+
 export function pedidoPlanSap(sap: string, fd: string, planes: Record<string, PlanDespacho>): number {
   const p = planes[fd];
   if (!p || !sap) return 0;
-  const q = String(sap).trim().toUpperCase();
+  const saps = extraerSaps(sap);
+  if (!saps.length) return 0;
+  let total = 0;
+  const vistos = new Set<string>();
   for (let i = 0; i < p.items.length; i++) {
-    if (p.items[i].sap.toUpperCase() === q) return p.items[i].cant;
+    const itemSap = String(p.items[i].sap || '').trim().toUpperCase();
+    if (saps.includes(itemSap) && !vistos.has(itemSap)) {
+      vistos.add(itemSap);
+      total += p.items[i].cant || 0;
+    }
   }
-  return 0;
+  return total;
+}
+
+export interface OpSapResumen {
+  op: string;
+  pedido: number;
+  ent: number;
+  stock: number;
+  acum: number;
+}
+
+export interface InfoSapDespacho {
+  sap: string;
+  enPlanSap: boolean;
+  enRegistrosDesp: boolean;
+  enDespacho: boolean;
+  hayPlanSapCargado: boolean;
+  pedidoSap: number;
+  stockRegistrado: number;
+  stockPlanSinReg: number;
+  entregadoSap: number;
+  acumuladoSap: number;
+  cubiertoOtrasOps: number;
+  pendienteSap: number;
+  pendienteOtrasOps: number;
+  excedenteSap: number;
+  opsRelacionadas: OpSapResumen[];
+  otrasOps: OpSapResumen[];
+}
+
+export function compararSapConDespacho(
+  sapInput: string,
+  fd: string,
+  registros: Registro[],
+  planes: Record<string, PlanDespacho>,
+  opActual?: string
+): InfoSapDespacho | null {
+  const targetSaps = extraerSaps(sapInput);
+  if (!targetSaps.length || !fd) return null;
+
+  const targetFd = fd.trim();
+  const opNorm = (opActual || '').trim().toLowerCase();
+  const planActual = planes[targetFd];
+  const hayPlanSapCargado = Boolean(planActual && planActual.items && planActual.items.length > 0);
+
+  // Match against SAP plan items
+  let pedidoPlan = 0;
+  let stockPlan = 0;
+  let enPlanSap = false;
+  if (planActual?.items) {
+    const vistosPlan = new Set<string>();
+    planActual.items.forEach((it) => {
+      const s = String(it.sap || '').trim().toUpperCase();
+      if (targetSaps.includes(s) && !vistosPlan.has(s)) {
+        vistosPlan.add(s);
+        enPlanSap = true;
+        pedidoPlan += it.cant || 0;
+        stockPlan += it.stock || 0;
+      }
+    });
+  }
+
+  // Match against registros in the same despacho
+  const opsMap: Record<string, OpSapResumen> = {};
+  registros.forEach((r) => {
+    const rFd = (r.fdesp || r.fecha || '').trim();
+    if (rFd !== targetFd) return;
+    const rSaps = extraerSaps(r.sap);
+    const matches = targetSaps.some((ts) => rSaps.includes(ts));
+    if (!matches) return;
+
+    const okKey = r.op.trim().toLowerCase();
+    if (!opsMap[okKey]) {
+      opsMap[okKey] = {
+        op: r.op.trim(),
+        pedido: 0,
+        ent: 0,
+        stock: 0,
+        acum: 0,
+      };
+    }
+    const entry = opsMap[okKey];
+    if (esStock(r)) {
+      entry.stock = Math.max(entry.stock, r.total || 0);
+    } else {
+      entry.ent += r.total || 0;
+    }
+    if ((r.pedido || 0) > entry.pedido) {
+      entry.pedido = r.pedido || 0;
+    }
+  });
+
+  const opsRelacionadas = Object.values(opsMap).map((o) => ({
+    ...o,
+    acum: o.ent + o.stock,
+  }));
+
+  const otrasOps = opsRelacionadas.filter((o) => o.op.toLowerCase() !== opNorm);
+  const enRegistrosDesp = opsRelacionadas.length > 0;
+  const enDespacho = enPlanSap || enRegistrosDesp;
+
+  const entregadoSap = opsRelacionadas.reduce((a, o) => a + o.ent, 0);
+  const stockRegistrado = opsRelacionadas.reduce((a, o) => a + o.stock, 0);
+  const acumuladoSap = entregadoSap + stockRegistrado;
+  const cubiertoOtrasOps = otrasOps.reduce((a, o) => a + o.acum, 0);
+
+  let pedidoSap = pedidoPlan;
+  if (!pedidoSap && opsRelacionadas.length > 0) {
+    pedidoSap = Math.max(...opsRelacionadas.map((o) => o.pedido || 0), 0);
+  }
+
+  const stockPlanSinReg =
+    enPlanSap && stockPlan > stockRegistrado ? stockPlan - stockRegistrado : 0;
+  const pendienteSap = pedidoSap > 0 ? Math.max(pedidoSap - acumuladoSap, 0) : 0;
+  const pendienteOtrasOps = pedidoSap > 0 ? Math.max(pedidoSap - cubiertoOtrasOps, 0) : 0;
+  const excedenteSap = pedidoSap > 0 ? Math.max(acumuladoSap - pedidoSap, 0) : 0;
+
+  return {
+    sap: targetSaps.join(' + '),
+    enPlanSap,
+    enRegistrosDesp,
+    enDespacho,
+    hayPlanSapCargado,
+    pedidoSap,
+    stockRegistrado,
+    stockPlanSinReg,
+    entregadoSap,
+    acumuladoSap,
+    cubiertoOtrasOps,
+    pendienteSap,
+    pendienteOtrasOps,
+    excedenteSap,
+    opsRelacionadas,
+    otrasOps,
+  };
 }
 
 export function pedidoDe(
@@ -199,14 +357,25 @@ export function pedidoDe(
   registros: Registro[],
   catalogo: CatalogoOp[],
   planesOp: Record<string, PlanOp>,
-  planes: Record<string, PlanDespacho>
+  planes: Record<string, PlanDespacho>,
+  sapOverride?: string
 ): number {
   const x = pedidoPlanOp(op, fd, planesOp);
   if (x) return x;
   const u = ultimoPedido(op, fd, registros);
   if (u) return u;
-  if (planesOp[fd] || planes[fd]) return 0;
+
+  // Compare OP's SAP code(s) against SAP codes scheduled for dispatch
   const m = catalogo.find((c) => c.op.toLowerCase() === op.trim().toLowerCase());
+  const sapToUse = (sapOverride || '').trim() || sapsDeCatalogoOp(m).join(' + ');
+  if (sapToUse) {
+    const infoSap = compararSapConDespacho(sapToUse, fd, registros, planes, op);
+    if (infoSap && infoSap.enDespacho && infoSap.pedidoSap > 0) {
+      return infoSap.pendienteOtrasOps > 0 ? infoSap.pendienteOtrasOps : infoSap.pedidoSap;
+    }
+  }
+
+  if (planesOp[fd] || planes[fd]) return 0;
   return m && m.cantidadTotal ? (parseInt(String(m.cantidadTotal), 10) || 0) : 0;
 }
 
@@ -243,11 +412,13 @@ export function recalcularEstados(
   planesOp: Record<string, PlanOp>,
   opExtra?: Record<string, OpExtra>
 ): Registro[] {
-  const q = op.toLowerCase();
+  const q = op.trim().toLowerCase();
+  const targetFd = (fd || '').trim();
   const ch: Registro[] = [];
   const e = estadoDe(op, fd, registros, planesOp, opExtra);
   registros.forEach((x) => {
-    if (x.op.toLowerCase() === q && (x.fdesp || '') === (fd || '') && x.estado !== e) {
+    const xFd = (x.fdesp || x.fecha || '').trim();
+    if (x.op.trim().toLowerCase() === q && xFd === targetFd && x.estado !== e) {
       x.estado = e;
       x.sync = false;
       ch.push(x);
@@ -398,7 +569,8 @@ export function agruparReporte(
   todosRegistros: Registro[],
   fDespFiltro: string,
   planesOp: Record<string, PlanOp>,
-  opExtra?: Record<string, OpExtra>
+  opExtra?: Record<string, OpExtra>,
+  planes?: Record<string, PlanDespacho>
 ) {
   const fds: Record<string, number> = {};
   fl.forEach((r) => {
@@ -487,6 +659,14 @@ export function agruparReporte(
       if (e === 'COMPLETO') comp = true;
     });
 
+    // If a SAP dispatch plan is loaded for this despacho, its target quantity takes precedence
+    // so multiple OPs with the same SAP don't double-count the SAP's pedido.
+    const planSapCant = x.sap && planes ? pedidoPlanSap(x.sap, x.fdesp, planes) : 0;
+    if (planSapCant > 0) {
+      ped = planSapCant;
+      conj = false;
+    }
+
     x.ord = m.ord;
     x.pos = m.pos;
     x.entF = es[x.fdesp + '|' + kk] || 0;
@@ -519,4 +699,120 @@ export function agruparReporte(
   g.ops.sort(cmpCarga);
   g.saps.sort(cmpCarga);
   return g;
+}
+
+export interface ResumenSapDespachoItem {
+  sap: string;
+  desc: string;
+  cliente: string;
+  enPlanSap: boolean;
+  pedidoSap: number;
+  stockRegistrado: number;
+  stockPlanSinReg: number;
+  entregado: number;
+  acumulado: number;
+  pendiente: number;
+  excedente: number;
+  ops: { op: string; ent: number; stock: number; acum: number; enProduccion?: boolean; cantPlanta?: number }[];
+  catalogoOps: string[];
+  estado: 'COMPLETO' | 'EN PRODUCCION' | 'INCOMPLETO' | '';
+}
+
+export function resumenSapsDespacho(
+  fd: string,
+  registros: Registro[],
+  planes: Record<string, PlanDespacho>,
+  opExtra?: Record<string, OpExtra>,
+  catalogo?: CatalogoOp[]
+): ResumenSapDespachoItem[] {
+  if (!fd) return [];
+  const targetFd = fd.trim();
+  const planActual = planes[targetFd];
+  const sapsOrder: string[] = [];
+  const sapsSeen = new Set<string>();
+
+  const addSapKey = (rawSap: string) => {
+    const s = rawSap.trim().toUpperCase();
+    if (!s || sapsSeen.has(s)) return;
+    sapsSeen.add(s);
+    sapsOrder.push(s);
+  };
+
+  if (planActual?.items) {
+    planActual.items.forEach((it) => addSapKey(it.sap));
+  }
+
+  registros.forEach((r) => {
+    if ((r.fdesp || r.fecha || '').trim() !== targetFd) return;
+    extraerSaps(r.sap).forEach((s) => addSapKey(s));
+  });
+
+  return sapsOrder.map((sap) => {
+    const info = compararSapConDespacho(sap, targetFd, registros, planes);
+
+    let desc = '';
+    const clientesSet = new Set<string>();
+    registros.forEach((r) => {
+      if ((r.fdesp || r.fecha || '').trim() !== targetFd) return;
+      if (extraerSaps(r.sap).includes(sap)) {
+        if (!desc && r.descripcion) desc = r.descripcion;
+        if (r.cliente) clientesSet.add(r.cliente);
+      }
+    });
+
+    const catOps: string[] = [];
+    if (catalogo) {
+      catalogo.forEach((c) => {
+        const hasSap = sapsDeCatalogoOp(c).includes(sap);
+        if (hasSap) {
+          catOps.push(c.op);
+          if (!desc) {
+            const mo = (c.modelos || []).find((m) => extraerSaps(m.sap).includes(sap));
+            desc = mo?.descripcion || c.descripcion || '';
+          }
+          if (c.cliente && !clientesSet.size) clientesSet.add(c.cliente);
+        }
+      });
+    }
+
+    const opsDetailed = (info?.opsRelacionadas || []).map((o) => {
+      const k = o.op.trim().toLowerCase() + '|' + targetFd;
+      const ex = opExtra?.[k] || opExtra?.[o.op.trim().toLowerCase()];
+      return {
+        ...o,
+        enProduccion: Boolean(ex?.enProduccion),
+        cantPlanta: typeof ex?.cantPlanta === 'number' ? ex.cantPlanta : 0,
+      };
+    });
+
+    const pedidoSap = info?.pedidoSap || 0;
+    const acumuladoSap = info?.acumuladoSap || 0;
+    const hayEnProd = opsDetailed.some((o) => o.enProduccion);
+
+    let estado: 'COMPLETO' | 'EN PRODUCCION' | 'INCOMPLETO' | '' = '';
+    if (pedidoSap > 0) {
+      if (acumuladoSap >= pedidoSap) estado = 'COMPLETO';
+      else if (hayEnProd) estado = 'EN PRODUCCION';
+      else estado = 'INCOMPLETO';
+    } else if (hayEnProd) {
+      estado = 'EN PRODUCCION';
+    }
+
+    return {
+      sap,
+      desc,
+      cliente: Array.from(clientesSet).join(', '),
+      enPlanSap: Boolean(info?.enPlanSap),
+      pedidoSap,
+      stockRegistrado: info?.stockRegistrado || 0,
+      stockPlanSinReg: info?.stockPlanSinReg || 0,
+      entregado: info?.entregadoSap || 0,
+      acumulado: acumuladoSap,
+      pendiente: info?.pendienteSap || 0,
+      excedente: info?.excedenteSap || 0,
+      ops: opsDetailed,
+      catalogoOps: catOps,
+      estado,
+    };
+  });
 }

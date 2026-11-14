@@ -10,6 +10,7 @@ import {
 } from '../utils/helpers';
 import { K_IGRID, ld, sv } from '../services/storage';
 import { descargarXml, xmlIngresos } from '../services/excel';
+import { encolarDel } from '../services/sheets';
 
 interface IngresosTabProps {
   iFecha: string;
@@ -117,24 +118,24 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
 
   const handleGuardarForm = () => {
     if (!iFecha) {
-      onToast('error', 'Pon la fecha');
+      onToast('error', 'Por favor ingresa la fecha del ingreso');
       return;
     }
     if (!iNombre) {
-      onToast('error', 'Selecciona el habilitador');
+      onToast('error', 'Por favor selecciona el habilitador');
       return;
     }
     if (!formOp.trim()) {
-      onToast('error', 'Ingresa la OP');
+      onToast('error', 'Por favor ingresa el número de OP');
       return;
     }
     const m = buscarCatalogo(formOp);
     if (m && m.modelos.length > 1 && formModeloSel < 0) {
-      onToast('error', 'Elige el modelo de la OP');
+      onToast('error', 'Por favor selecciona el modelo de la OP');
       return;
     }
     if (!(formTotalCalc > 0)) {
-      onToast('error', 'Ingresa unidades y cantidad');
+      onToast('error', 'Ingresa unidades por empaque y cantidad de bultos');
       return;
     }
     if (!esEntero(formU) || !esEntero(formC)) {
@@ -356,11 +357,11 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
   const handleGuardarGrid = () => {
     if (igridSavePending) return;
     if (!iFecha) {
-      onToast('error', 'Pon la fecha');
+      onToast('error', 'Por favor ingresa la fecha del ingreso');
       return;
     }
     if (!iNombre) {
-      onToast('error', 'Selecciona el habilitador');
+      onToast('error', 'Por favor selecciona el habilitador');
       return;
     }
 
@@ -382,14 +383,14 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     });
 
     if (!okList.length) {
-      onToast('error', 'Ninguna fila está lista. Revisa las marcadas en rojo');
+      onToast('error', 'Ninguna fila está lista. Revisa las filas marcadas con error');
       return;
     }
 
     if (avisos.length && !confirmarAvisos(avisos)) return;
     if (
       !window.confirm(
-        `Se guardarán ${okList.length} ingreso(s) del ${fcorta(iFecha)}${errs ? `\n(${errs} fila(s) con errores quedan en la tabla)` : ''}.\n¿Confirmar?`
+        `Se guardarán ${okList.length} ingreso(s) al almacén del ${fcorta(iFecha)}${errs ? `\n(${errs} fila(s) con errores quedan pendientes en la tabla)` : ''}.\n\n¿Deseas continuar?`
       )
     ) {
       return;
@@ -430,7 +431,7 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     setIgrid(remaining);
     saveGridDraft(remaining);
     setIgridSavePending(false);
-    onToast('ok', `${nuevos.length} ingreso(s) guardados${errs ? ` · ${errs} con errores pendientes` : ''}`);
+    onToast('ok', `${nuevos.length} ingreso(s) guardado(s) exitosamente${errs ? ` · ${errs} pendiente(s) por corregir` : ''}`);
   };
 
   // Filtered ingresos
@@ -457,11 +458,18 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     });
 
   const handleBorrar = (r: Ingreso) => {
-    if (!window.confirm('¿Borrar este ingreso?')) return;
+    if (
+      !window.confirm(
+        `¿Eliminar este ingreso al almacén de la OP ${r.op} (${r.total || 0} u - ${r.nombre}) registrado el ${fcorta(r.fecha)}?`
+      )
+    ) {
+      return;
+    }
     const remaining = ingresos.filter((x) => x.id !== r.id);
     onBorrarRemoto(r.id);
+    encolarDel(r.id, 'ingresos');
     onIngresosChange(remaining);
-    onToast('ok', 'Ingreso eliminado');
+    onToast('ok', `Ingreso de OP ${r.op} (${r.total || 0} u) eliminado`);
   };
 
   const handleExportExcel = () => {

@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { CatalogoOp, Ingreso, PlanOp, Registro } from '../types';
+import { CatalogoOp, Ingreso, PlanDespacho, PlanOp, Registro } from '../types';
 import {
   agruparReporte,
   entregasReales,
@@ -116,9 +116,10 @@ export function xmlEntregas(
   registrosContext: Registro[],
   fDespFiltro: string,
   planesOp: Record<string, PlanOp>,
-  opExtra?: Record<string, import('../types').OpExtra>
+  opExtra?: Record<string, import('../types').OpExtra>,
+  planes?: Record<string, PlanDespacho>
 ): string {
-  const g = agruparReporte(fl, registrosContext, fDespFiltro, planesOp, opExtra);
+  const g = agruparReporte(fl, registrosContext, fDespFiltro, planesOp, opExtra, planes);
   const ents = entregasReales(fl);
 
   const r1 = [
@@ -384,7 +385,13 @@ export function opsDeSap(sap: string, catalogo: CatalogoOp[]) {
   const q = String(sap).trim().toUpperCase();
   const r: { m: CatalogoOp; i: number }[] = [];
   catalogo.forEach((c) => {
-    (c.modelos || []).forEach((mo, i) => {
+    const modelos =
+      c.modelos && c.modelos.length
+        ? c.modelos
+        : c.sap
+        ? [{ descripcion: c.descripcion || '', sap: c.sap }]
+        : [];
+    modelos.forEach((mo, i) => {
       if (String(mo.sap || '').trim().toUpperCase() === q) {
         r.push({ m: c, i });
       }

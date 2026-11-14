@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { OpExtra, PlanOp, Registro } from '../types';
+import { OpExtra, PlanDespacho, PlanOp, Registro } from '../types';
 import {
   agrupar,
   agruparReporte,
+  compararSapConDespacho,
   entregasReales,
   esStock,
   estadoDe,
@@ -16,11 +17,13 @@ import { descargarXml, xmlEntregas } from '../services/excel';
 import { encolarDel } from '../services/sheets';
 import { EditarStockModal } from './EditarStockModal';
 import { EditarPlantaModal } from './EditarPlantaModal';
+import { EntregasOpModal } from './EntregasOpModal';
 
 interface RegistrosTabProps {
   registros: Registro[];
   onRegistrosChange: (newRegs: Registro[], toSend?: Registro[]) => void;
   nombres: string[];
+  planes?: Record<string, PlanDespacho>;
   planesOp: Record<string, PlanOp>;
   opExtra?: Record<string, OpExtra>;
   onUpdateOpExtra?: (op: string, fdesp: string, changes: Partial<OpExtra>) => void;
@@ -34,6 +37,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
   registros,
   onRegistrosChange,
   nombres,
+  planes = {},
   planesOp,
   opExtra = {},
   onUpdateOpExtra,
@@ -104,6 +108,14 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
     pedido?: number;
     entregado?: number;
     stock?: number;
+  } | null>(null);
+
+  const [entregasModalOp, setEntregasModalOp] = useState<{
+    op: string;
+    fdesp: string;
+    cliente: string;
+    pedido: number;
+    stock: number;
   } | null>(null);
 
   const handleToggleEnProduccion = (op: string, fdesp: string, checked: boolean) => {
@@ -247,16 +259,49 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
   };
 
   const handleBorrar = (r: Registro) => {
-    if (!window.confirm('¿Borrar este registro?')) return;
+    if (
+      !window.confirm(
+        `¿Eliminar este registro de entrega de la OP ${r.op} (${r.total || 0} u - ${r.nombre}) registrado el ${fcorta(r.fecha)}?`
+      )
+    ) {
+      return;
+    }
     const remaining = registros.filter((x) => x.id !== r.id);
-    const cb = recalcularEstados(r.op, r.fdesp, remaining, planesOp, opExtra);
+    const cb = recalcularEstados(r.op, r.fdesp || r.fecha, remaining, planesOp, opExtra);
     onBorrarRemoto(r.id);
+    encolarDel(r.id, 'registros');
     onRegistrosChange(remaining, cb);
-    onToast('ok', 'Registro eliminado');
+    onToast('ok', `Registro de OP ${r.op} (${r.total || 0} u) eliminado`);
+  };
+
+  const handleBorrarTodasOp = (op: string, fd: string) => {
+    const q = op.trim().toLowerCase();
+    const targetFd = (fd || '').trim();
+    const toDelete = registros.filter(
+      (x) => !esStock(x) && x.op.trim().toLowerCase() === q && (x.fdesp || x.fecha || '').trim() === targetFd
+    );
+    if (!toDelete.length) return;
+    if (
+      !window.confirm(
+        `¿Eliminar TODAS las ${toDelete.length} entregas de la OP ${op} en el despacho ${fcorta(fd)}? Esta acción es definitiva.`
+      )
+    ) {
+      return;
+    }
+    toDelete.forEach((r) => {
+      onBorrarRemoto(r.id);
+      encolarDel(r.id, 'registros');
+    });
+    const toDeleteIds = new Set(toDelete.map((x) => x.id));
+    const remaining = registros.filter((x) => !toDeleteIds.has(x.id));
+    const cb = recalcularEstados(op, fd, remaining, planesOp, opExtra);
+    onRegistrosChange(remaining, cb);
+    setEntregasModalOp(null);
+    onToast('ok', `Se eliminaron las ${toDelete.length} entregas de OP ${op}`);
   };
 
   const handleExportExcel = () => {
-    if (!entregasReales(filtrados).length && !agruparReporte(filtrados, registros, fDesp, planesOp, opExtra).ops.length) {
+    if (!entregasReales(filtrados).length && !agruparReporte(filtrados, registros, fDesp, planesOp, opExtra, planes).ops.length) {
       onToast('error', 'Nada que exportar');
       return;
     }
@@ -264,13 +309,13 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
       onToast('ok', `Se exporta ${filtrados.length} de ${registros.length} por los filtros activos`);
     }
     const nombreArchivo = `entregas_${hoy()}.xls`;
-    const xml = xmlEntregas(filtrados, registros, fDesp, planesOp, opExtra);
+    const xml = xmlEntregas(filtrados, registros, fDesp, planesOp, opExtra, planes);
     descargarXml(xml, nombreArchivo, onToast);
   };
 
   const handleAbrirImprimir = () => {
     const ents = entregasReales(filtrados);
-    const g = agruparReporte(filtrados, registros, fDesp, planesOp, opExtra);
+    const g = agruparReporte(filtrados, registros, fDesp, planesOp, opExtra, planes);
     if (!ents.length && !g.ops.length) {
       onToast('error', 'Nada que imprimir');
       return;
@@ -280,7 +325,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
 
   const ejecutarImpresion = (opts: typeof printOpts) => {
     const ents = entregasReales(filtrados);
-    const g = agruparReporte(filtrados, registros, fDesp, planesOp, opExtra);
+    const g = agruparReporte(filtrados, registros, fDesp, planesOp, opExtra, planes);
     if (!ents.length && !g.ops.length) {
       onToast('error', 'Nada que imprimir');
       return;
@@ -385,6 +430,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
   };
 
   const gSummary = agrupar(filtrados, registros, planesOp, opExtra);
+  const gReporte = agruparReporte(filtrados, registros, fDesp, planesOp, opExtra, planes);
   const totEntregadasSummary = filtrados.reduce(
     (a, r) => a + (esStock(r) ? 0 : r.total || 0),
     0
@@ -548,7 +594,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                 </thead>
                 <tbody>
                   {filtrados.map((r, idx) => {
-                    const est = estadoReg(r, registros, planesOp);
+                    const est = estadoReg(r, registros, planesOp, opExtra);
                     const n =
                       r.empaque === 'caja'
                         ? r.c === 1
@@ -805,64 +851,113 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                               </label>
                             </td>
                             <td className="k">
-                              {enProd ? (
-                                <div>
-                                  <span className="badge b-ENPRODUCCION">EN PRODUCCIÓN</span>
-                                  {o.pedido > 0 && (
-                                    <div
-                                      style={{
-                                        fontSize: '0.72rem',
-                                        marginTop: '3px',
-                                        fontWeight: 600,
-                                        color: ok ? 'var(--green)' : 'var(--muted)',
-                                      }}
-                                    >
-                                      {ok
-                                        ? pd < 0
-                                          ? `Cubierto (+${-pd})`
-                                          : 'Cubierto'
-                                        : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
-                                    </div>
-                                  )}
-                                </div>
-                              ) : o.pedido > 0 ? (
-                                <div>
-                                  <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
-                                    {ok
-                                      ? pd < 0
-                                        ? `COMPLETO (+${-pd})`
-                                        : 'COMPLETO'
-                                      : `Faltan ${pd}`}
-                                  </span>
-                                  {cantPlanta > 0 && !ok && (
-                                    <div
-                                      style={{
-                                        fontSize: '0.72rem',
-                                        marginTop: '3px',
-                                        color: 'var(--blue)',
-                                        fontWeight: 600,
-                                      }}
-                                    >
-                                      🏭 {cantPlanta} u en planta
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                cantPlanta > 0 && (
-                                  <span
-                                    style={{
-                                      fontSize: '0.76rem',
-                                      color: 'var(--blue)',
-                                      fontWeight: 600,
-                                    }}
-                                  >
-                                    🏭 {cantPlanta} u en planta
-                                  </span>
-                                )
-                              )}
+                              {(() => {
+                                const sapsDeOp = Object.keys(o.lineas)
+                                  .map((k) => o.lineas[k].sap)
+                                  .filter(Boolean)
+                                  .join(' + ');
+                                const sapCheck = sapsDeOp
+                                  ? compararSapConDespacho(sapsDeOp, o.fdesp, registros, planes, o.op)
+                                  : null;
+                                const sapCubiertoPorOtras =
+                                  sapCheck &&
+                                  sapCheck.otrasOps.length > 0 &&
+                                  sapCheck.pedidoSap > 0 &&
+                                  sapCheck.acumuladoSap >= sapCheck.pedidoSap;
+
+                                return (
+                                  <>
+                                    {enProd ? (
+                                      <div>
+                                        <span className="badge b-ENPRODUCCION">EN PRODUCCIÓN</span>
+                                        {o.pedido > 0 && (
+                                          <div
+                                            style={{
+                                              fontSize: '0.72rem',
+                                              marginTop: '3px',
+                                              fontWeight: 600,
+                                              color: ok ? 'var(--green)' : 'var(--muted)',
+                                            }}
+                                          >
+                                            {ok
+                                              ? pd < 0
+                                                ? `Cubierto (+${-pd})`
+                                                : 'Cubierto'
+                                              : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : o.pedido > 0 ? (
+                                      <div>
+                                        <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
+                                          {ok
+                                            ? pd < 0
+                                              ? `COMPLETO (+${-pd})`
+                                              : 'COMPLETO'
+                                            : `Faltan ${pd}`}
+                                        </span>
+                                        {cantPlanta > 0 && !ok && (
+                                          <div
+                                            style={{
+                                              fontSize: '0.72rem',
+                                              marginTop: '3px',
+                                              color: 'var(--blue)',
+                                              fontWeight: 600,
+                                            }}
+                                          >
+                                            🏭 {cantPlanta} u en planta
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      cantPlanta > 0 && (
+                                        <span
+                                          style={{
+                                            fontSize: '0.76rem',
+                                            color: 'var(--blue)',
+                                            fontWeight: 600,
+                                          }}
+                                        >
+                                          🏭 {cantPlanta} u en planta
+                                        </span>
+                                      )
+                                    )}
+                                    {sapCubiertoPorOtras && !ok && (
+                                      <div
+                                        style={{
+                                          fontSize: '0.7rem',
+                                          marginTop: '3px',
+                                          color: 'var(--green)',
+                                          fontWeight: 700,
+                                        }}
+                                        title={`Completado junto con ${sapCheck!.otrasOps.map((x) => x.op).join(', ')}`}
+                                      >
+                                        ✓ SAP cubierto ({sapCheck!.acumuladoSap}/{sapCheck!.pedidoSap} u)
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </td>
                             <td className="actions" style={{ whiteSpace: 'nowrap' }}>
                               <div style={{ display: 'inline-flex', gap: '4px', justifyContent: 'flex-end' }}>
+                                <button
+                                  className="stock-btn"
+                                  type="button"
+                                  onClick={() =>
+                                    setEntregasModalOp({
+                                      op: o.op,
+                                      fdesp: o.fdesp,
+                                      cliente: o.cliente,
+                                      pedido: o.pedido,
+                                      stock: o.stock,
+                                    })
+                                  }
+                                  title="Ver y borrar entregas individuales registradas para esta OP"
+                                  style={{ borderColor: 'var(--amber)' }}
+                                >
+                                  👁️ Entregas
+                                </button>
                                 <button
                                   className="stock-btn"
                                   type="button"
@@ -911,7 +1006,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
               {/* Table 2: Resumen por SAP */}
               <div className="panel" style={{ padding: '14px', marginBottom: '8px' }}>
                 <div className="sec" style={{ marginBottom: '12px' }}>
-                  Resumen por SAP y Despacho ({gSummary.saps.length} códigos SAP — suma de OPs del mismo despacho)
+                  Resumen por SAP y Despacho ({gReporte.saps.length} códigos SAP — suma de OPs del mismo despacho)
                 </div>
 
                 <div className="table-wrap">
@@ -922,46 +1017,82 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                         <th>SAP</th>
                         <th>Descripción</th>
                         <th>OPs agrupadas</th>
+                        <th className="n">Pedido SAP</th>
                         <th className="n">Stock inicial</th>
                         <th className="n">Entregado</th>
+                        <th className="n">Acumulado</th>
+                        <th className="n">Faltante</th>
+                        <th className="n">Excedente</th>
+                        <th className="k">Estado</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {gSummary.saps.map((x) => (
-                        <tr key={x.fdesp + '|' + x.sap}>
-                          <td className="mono">{fcorta(x.fdesp)}</td>
-                          <td>
-                            <span
-                              className="mono"
-                              style={{
-                                fontWeight: 700,
-                                background: 'var(--alt)',
-                                padding: '2px 8px',
-                                borderRadius: '6px',
-                              }}
-                            >
-                              {x.sap || '—'}
-                            </span>
-                          </td>
-                          <td>{x.desc}</td>
-                          <td className="mono" style={{ fontSize: '0.82rem' }}>
-                            {Object.keys(x.ops).join(', ')}
-                          </td>
-                          <td className="n mono">{x.stock > 0 ? `${x.stock} u` : '—'}</td>
-                          <td className="n mono">
-                            <span
-                              className="badge"
-                              style={{
-                                fontSize: '0.8rem',
-                                background: 'var(--amber)',
-                                color: 'var(--on-amber)',
-                              }}
-                            >
-                              {x.ent} u
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {gReporte.saps.map((x) => {
+                        const opsList = Object.keys(x.ops);
+                        return (
+                          <tr key={x.fdesp + '|' + (x.sap || x.desc)}>
+                            <td className="mono">{fcorta(x.fdesp)}</td>
+                            <td>
+                              <span
+                                className="mono"
+                                style={{
+                                  fontWeight: 700,
+                                  background: 'var(--alt)',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                }}
+                              >
+                                {x.sap || '—'}
+                              </span>
+                            </td>
+                            <td>{x.desc}</td>
+                            <td className="mono" style={{ fontSize: '0.82rem' }}>
+                              {opsList.join(', ')}
+                              {opsList.length > 1 && (
+                                <span
+                                  style={{
+                                    marginLeft: '6px',
+                                    fontSize: '0.72rem',
+                                    color: 'var(--blue)',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  ({opsList.length} OPs)
+                                </span>
+                              )}
+                            </td>
+                            <td className="n mono">{x.conj ? 'CONJUNTO' : x.pedido || 0}</td>
+                            <td className="n mono">{x.stock > 0 ? `${x.stock} u` : '—'}</td>
+                            <td className="n mono">
+                              <strong>{x.ent} u</strong>
+                            </td>
+                            <td className="n mono">
+                              <strong>{x.acum ?? x.ent} u</strong>
+                            </td>
+                            <td className="n mono">
+                              {x.conj ? '—' : (x.falt ?? 0) > 0 ? `${x.falt} u` : '0'}
+                            </td>
+                            <td className="n mono">
+                              {x.conj ? (
+                                '—'
+                              ) : (x.exc ?? 0) > 0 ? (
+                                <span style={{ color: 'var(--red)', fontWeight: 700 }}>{x.exc} u</span>
+                              ) : (
+                                '0'
+                              )}
+                            </td>
+                            <td className="k">
+                              {x.estado ? (
+                                <span className={`badge b-${x.estado.replace(/\s+/g, '')}`}>
+                                  {x.estado}
+                                </span>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1167,6 +1298,24 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
           stock={plantaEditModal.stock}
           onSave={handleSavePlantaModal}
           onClose={() => setPlantaEditModal(null)}
+        />
+      )}
+
+      {entregasModalOp && (
+        <EntregasOpModal
+          op={entregasModalOp.op}
+          fdesp={entregasModalOp.fdesp}
+          cliente={entregasModalOp.cliente}
+          pedido={entregasModalOp.pedido}
+          stock={entregasModalOp.stock}
+          entregas={registros.filter(
+            (r) =>
+              r.op.trim().toLowerCase() === entregasModalOp.op.trim().toLowerCase() &&
+              (r.fdesp || r.fecha || '').trim() === entregasModalOp.fdesp.trim()
+          )}
+          onDeleteRegistro={handleBorrar}
+          onDeleteAllForOp={() => handleBorrarTodasOp(entregasModalOp.op, entregasModalOp.fdesp)}
+          onClose={() => setEntregasModalOp(null)}
         />
       )}
     </div>

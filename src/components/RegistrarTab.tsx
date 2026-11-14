@@ -14,16 +14,20 @@ import {
   acumulado,
   avisoCant,
   avisoFecha,
+  compararSapConDespacho,
   confirmarAvisos,
   esEntero,
   esStock,
+  extraerSaps,
   fcorta,
   LIM,
   pedidoDe,
   pedidoPlanOp,
   pedidoPlanSap,
   recalcularEstados,
+  resumenSapsDespacho,
   sanitizarStockDuplicados,
+  sapsDeCatalogoOp,
   stockDe,
   ultimoPedido,
   agrupar,
@@ -40,6 +44,7 @@ import { encolarDel } from '../services/sheets';
 import { ConfirmarListaModal } from './ConfirmarListaModal';
 import { EditarStockModal } from './EditarStockModal';
 import { EditarPlantaModal } from './EditarPlantaModal';
+import { EntregasOpModal } from './EntregasOpModal';
 import { K_GRID, ld, sv } from '../services/storage';
 
 interface RegistrarTabProps {
@@ -59,6 +64,7 @@ interface RegistrarTabProps {
   onModoRegChange: (m: 'tabla' | 'form') => void;
   opExtra: Record<string, OpExtra>;
   onUpdateOpExtra: (op: string, fdesp: string, changes: Partial<OpExtra>) => void;
+  onBorrarRemoto?: (id: string) => void;
   onToast: (t: 'ok' | 'error', m: string) => void;
 }
 
@@ -79,6 +85,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   onModoRegChange,
   opExtra,
   onUpdateOpExtra,
+  onBorrarRemoto,
   onToast,
 }) => {
   // Form State
@@ -94,6 +101,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   const [showSug, setShowSug] = useState(false);
   const [opAplicada, setOpAplicada] = useState('');
   const [opPedidoVista, setOpPedidoVista] = useState('');
+  const [pedidoManualForm, setPedidoManualForm] = useState(false);
 
   // Grid State
   const [grid, setGrid] = useState<GridRow[]>(() => {
@@ -131,6 +139,56 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     entregado?: number;
     stock?: number;
   } | null>(null);
+
+  const [entregasModalOp, setEntregasModalOp] = useState<{
+    op: string;
+    fdesp: string;
+    cliente: string;
+    pedido: number;
+    stock: number;
+  } | null>(null);
+
+  const handleBorrarRegistro = (r: Registro) => {
+    if (
+      !window.confirm(
+        `¿Eliminar esta entrega de OP ${r.op} (${r.total || 0} u - ${r.nombre || 'habilitador'}) registrada el ${fcorta(r.fecha)}?`
+      )
+    ) {
+      return;
+    }
+    const remaining = registros.filter((x) => x.id !== r.id);
+    const cb = recalcularEstados(r.op, r.fdesp || r.fecha, remaining, planesOp, opExtra);
+    encolarDel(r.id, 'registros');
+    if (onBorrarRemoto) onBorrarRemoto(r.id);
+    onRegistrosChange(remaining, cb);
+    onToast('ok', `Entrega de OP ${r.op} (${r.total || 0} u) eliminada`);
+  };
+
+  const handleBorrarTodasOp = (op: string, fd: string) => {
+    const q = op.trim().toLowerCase();
+    const targetFd = (fd || '').trim();
+    const toDelete = registros.filter(
+      (x) => !esStock(x) && x.op.trim().toLowerCase() === q && (x.fdesp || x.fecha || '').trim() === targetFd
+    );
+    if (!toDelete.length) return;
+    if (
+      !window.confirm(
+        `¿Eliminar TODAS las ${toDelete.length} entregas de la OP ${op} en el despacho ${fcorta(fd)}? Esta acción es definitiva.`
+      )
+    ) {
+      return;
+    }
+    toDelete.forEach((r) => {
+      encolarDel(r.id, 'registros');
+      if (onBorrarRemoto) onBorrarRemoto(r.id);
+    });
+    const toDeleteIds = new Set(toDelete.map((x) => x.id));
+    const remaining = registros.filter((x) => !toDeleteIds.has(x.id));
+    const cb = recalcularEstados(op, fd, remaining, planesOp, opExtra);
+    onRegistrosChange(remaining, cb);
+    setEntregasModalOp(null);
+    onToast('ok', `Se eliminaron las ${toDelete.length} entregas de OP ${op}`);
+  };
 
   const handleToggleEnProduccion = (op: string, fd: string, val: boolean) => {
     onUpdateOpExtra(op, fd, { enProduccion: val });
@@ -267,14 +325,21 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     return catalogo.find((c) => c.op.toLowerCase() === q) || null;
   };
 
-  // Sync Pedido on OP change in form
+  // Sync Pedido on OP / SAP change in form
   useEffect(() => {
     const op = formOp.trim().toLowerCase();
-    if (!op || op === opPedidoVista) return;
-    setOpPedidoVista(op);
-    const p = pedidoDe(op, fdesp, registros, catalogo, planesOp, planes);
-    if (p) setFormPedido(String(p));
-  }, [formOp, fdesp, registros, catalogo, planesOp, planes, opPedidoVista]);
+    if (!op) return;
+    if (op !== opPedidoVista) {
+      setOpPedidoVista(op);
+      setPedidoManualForm(false);
+      const p = pedidoDe(op, fdesp, registros, catalogo, planesOp, planes, formSap);
+      if (p) setFormPedido(String(p));
+      else if (!pedidoManualForm) setFormPedido('');
+    } else if (!pedidoManualForm && formSap.trim()) {
+      const p = pedidoDe(op, fdesp, registros, catalogo, planesOp, planes, formSap);
+      if (p) setFormPedido(String(p));
+    }
+  }, [formOp, formSap, fdesp, registros, catalogo, planesOp, planes, opPedidoVista, pedidoManualForm]);
 
   // Sync Planta and EnProduccion on formOp change
   useEffect(() => {
@@ -300,41 +365,74 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     setFormOp(m.op);
     setFormCliente(m.cliente || '');
     setShowSug(false);
+    setPedidoManualForm(false);
 
+    let selSap = '';
     if (m.modelos.length === 1) {
       setFormModeloSel(0);
       setFormDesc(m.modelos[0].descripcion);
-      setFormSap(m.modelos[0].sap || '');
+      selSap = m.modelos[0].sap || m.sap || '';
+      setFormSap(selSap);
+    } else if (m.modelos.length > 1) {
+      // Compare each model's SAP against dispatch SAPs; auto-select if exactly 1 matches
+      const matchingIdxs = m.modelos
+        .map((mo, idx) => ({
+          idx,
+          match: mo.sap ? compararSapConDespacho(mo.sap, fdesp, registros, planes, m.op)?.enDespacho : false,
+        }))
+        .filter((x) => x.match)
+        .map((x) => x.idx);
+
+      if (matchingIdxs.length === 1) {
+        const idx = matchingIdxs[0];
+        setFormModeloSel(idx);
+        setFormDesc(m.modelos[idx].descripcion);
+        selSap = m.modelos[idx].sap || '';
+        setFormSap(selSap);
+      } else {
+        setFormModeloSel(-1);
+        setFormDesc('');
+        setFormSap('');
+        selSap = sapsDeCatalogoOp(m).join(' + ');
+      }
     } else {
       setFormModeloSel(-1);
-      setFormDesc('');
-      setFormSap('');
+      setFormDesc(m.descripcion || '');
+      selSap = m.sap || '';
+      setFormSap(selSap);
     }
 
-    const ped =
-      pedidoPlanOp(m.op, fdesp, planesOp) ||
-      ultimoPedido(m.op, fdesp, registros) ||
-      m.cantidadTotal ||
-      0;
+    const ped = pedidoDe(m.op, fdesp, registros, catalogo, planesOp, planes, selSap);
     if (ped) setFormPedido(String(ped));
+    else setFormPedido('');
   };
 
   const handleSelectModeloForm = (idx: number, m: CatalogoOp) => {
     setFormModeloSel(idx);
+    setPedidoManualForm(false);
+    let selSap = '';
     if (idx === -2) {
       // Todos juntos
       setFormDesc(m.modelos.map((x) => x.descripcion).join(' + '));
-      setFormSap(m.modelos.map((x) => x.sap || '').filter(Boolean).join(' + '));
+      selSap = m.modelos.map((x) => x.sap || '').filter(Boolean).join(' + ');
+      setFormSap(selSap);
     } else if (idx >= 0 && m.modelos[idx]) {
       setFormDesc(m.modelos[idx].descripcion);
-      setFormSap(m.modelos[idx].sap || '');
-      // Check if SAP has special quantity in plan
-      const sapPlanQ = pedidoPlanSap(m.modelos[idx].sap, fdesp, planes);
-      if (sapPlanQ && !pedidoPlanOp(m.op, fdesp, planesOp)) {
-        setFormPedido(String(sapPlanQ));
-      }
+      selSap = m.modelos[idx].sap || '';
+      setFormSap(selSap);
     }
+    const ped = pedidoDe(m.op, fdesp, registros, catalogo, planesOp, planes, selSap);
+    if (ped) setFormPedido(String(ped));
   };
+
+  // Live SAP comparison for Form
+  const formSapEf =
+    formSap.trim() ||
+    (formOp.trim() ? sapsDeCatalogoOp(buscarCatalogo(formOp)).join(' + ') : '');
+  const formSapInfo =
+    formOp.trim() && formSapEf
+      ? compararSapConDespacho(formSapEf, fdesp, registros, planes, formOp)
+      : null;
 
   // Form total calculation
   const formTotalCalc = (parseInt(formU, 10) || 0) * (parseInt(formC, 10) || 0);
@@ -342,37 +440,37 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   // Form submit
   const handleGuardarForm = () => {
     if (!fdesp) {
-      onToast('error', 'Pon la fecha de despacho');
+      onToast('error', 'Por favor ingresa la fecha de despacho');
       return;
     }
     if (!fecha) {
-      onToast('error', 'Pon la fecha de registro');
+      onToast('error', 'Por favor ingresa la fecha de registro');
       return;
     }
     if (!nombre) {
-      onToast('error', 'Selecciona el habilitador');
+      onToast('error', 'Por favor selecciona el habilitador');
       return;
     }
     if (!formOp.trim()) {
-      onToast('error', 'Ingresa la OP');
+      onToast('error', 'Por favor ingresa el número de OP');
       return;
     }
     const mAct = buscarCatalogo(formOp);
     if (mAct && mAct.modelos.length > 1 && formModeloSel === -1) {
-      onToast('error', 'Elige el modelo de la OP');
+      onToast('error', 'Por favor selecciona el modelo correspondiente a la OP');
       return;
     }
     const pedNum = parseInt(formPedido, 10) || 0;
     if (!(pedNum > 0)) {
-      onToast('error', 'Ingresa la cantidad pedida de la OP');
+      onToast('error', 'Por favor ingresa la cantidad pedida de la OP');
       return;
     }
     if (!(formTotalCalc > 0)) {
-      onToast('error', 'Ingresa unidades y cantidad entregada');
+      onToast('error', 'Por favor ingresa las unidades por empaque y la cantidad entregada');
       return;
     }
     if (!esEntero(formPedido) || !esEntero(formU) || !esEntero(formC)) {
-      onToast('error', 'Pedido, unidades y cantidad deben ser números enteros (sin decimales ni negativos)');
+      onToast('error', 'Pedido, unidades y cantidad deben ser números enteros mayores a cero');
       return;
     }
 
@@ -382,33 +480,60 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     avisoCant(parseInt(formU, 10) || 0, parseInt(formC, 10) || 0).forEach((a) => w.push(a));
     if (!mAct) {
       w.push(
-        `La OP ${formOp.trim()} no está en el catálogo de OP${!formDesc && !formCliente ? ' y se guardará sin descripción ni cliente' : ''}`
+        `La OP ${formOp.trim()} no se encuentra en el catálogo${!formDesc && !formCliente ? ' y se guardará sin descripción ni cliente vinculados' : ''}`
       );
     } else {
-      if (!formDesc) w.push('La descripción está vacía');
-      if (!formCliente) w.push('El cliente está vacío');
+      if (!formDesc) w.push('La descripción del producto está vacía');
+      if (!formCliente) w.push('El nombre del cliente está vacío');
     }
-    if (pedNum > LIM.pedido) w.push(`Pedido muy alto (${pedNum})`);
+
+    // Compare against SAP codes to dispatch
+    const hasSapPlan = Boolean(planes[fdesp]?.items?.length);
+    if (hasSapPlan) {
+      if (!formSap.trim()) {
+        w.push(
+          `Hay una lista de despacho por SAP cargada, pero esta OP no tiene código SAP ingresado para compararla`
+        );
+      } else if (!formSapInfo?.enPlanSap) {
+        w.push(
+          `El código SAP ${formSap.trim()} de esta OP NO figura en la lista de códigos SAP a despachar del ${fcorta(fdesp)}`
+        );
+      }
+    }
+
+    if (pedNum > LIM.pedido) w.push(`Cantidad de pedido inusualmente alta (${pedNum} u)`);
     if (pedNum > 0) {
       const ac = acumulado(formOp.trim(), fdesp, registros);
       if (ac + formTotalCalc > pedNum) {
-        w.push(`Se excede el pedido en ${ac + formTotalCalc - pedNum} u (pedido ${pedNum}, entregado + stock ${ac})`);
+        w.push(`Esta entrega excede el pedido de la OP en ${ac + formTotalCalc - pedNum} u (Pedido OP: ${pedNum} u · Acumulado previo: ${ac} u)`);
       }
       const prev = ultimoPedido(formOp.trim(), fdesp, registros);
       if (prev > 0 && prev !== pedNum) {
-        w.push(`El pedido de ${formOp.trim()} cambia de ${prev} a ${pedNum} en todas sus entradas de ese despacho`);
+        w.push(`El pedido de ${formOp.trim()} se actualizará de ${prev} u a ${pedNum} u en todas sus entradas de este despacho`);
       }
+    }
+    if (
+      formSapInfo &&
+      formSapInfo.enDespacho &&
+      formSapInfo.pedidoSap > 0 &&
+      formSapInfo.otrasOps.length > 0 &&
+      formSapInfo.acumuladoSap + formTotalCalc > formSapInfo.pedidoSap
+    ) {
+      const excSap = formSapInfo.acumuladoSap + formTotalCalc - formSapInfo.pedidoSap;
+      w.push(
+        `Sumando las otras OPs del SAP ${formSapInfo.sap} (${formSapInfo.otrasOps.map((x) => x.op).join(', ')}), esta entrega excede el despacho del SAP en ${excSap} u (Pedido SAP: ${formSapInfo.pedidoSap} u · Cubierto actual: ${formSapInfo.acumuladoSap} u)`
+      );
     }
     const isDup = registros.some(
       (r) =>
-        r.op.toLowerCase() === formOp.trim().toLowerCase() &&
-        (r.fdesp || '') === fdesp &&
+        r.op.toLowerCase().trim() === formOp.trim().toLowerCase() &&
+        (r.fdesp || r.fecha || '').trim() === fdesp.trim() &&
         r.u === (parseInt(formU, 10) || 0) &&
         r.c === (parseInt(formC, 10) || 0) &&
         r.total > 0 &&
         Date.now() - new Date(r.creado).getTime() < 9e5
     );
-    if (isDup) w.push('Igual a una entrada guardada hace menos de 15 min');
+    if (isDup) w.push('Existe una entrega idéntica guardada hace menos de 15 minutos (posible duplicado)');
 
     if (!confirmarAvisos(w)) return;
 
@@ -474,6 +599,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       setFormModeloSel(-1);
       setFormDesc('');
       setFormSap('');
+      setPedidoManualForm(false);
       onToast('ok', `Guardado. Elige el siguiente modelo de ${mAct.op}`);
     } else {
       setFormOp('');
@@ -483,6 +609,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       setOpAplicada('');
       setOpPedidoVista('');
       setFormPedido('');
+      setPedidoManualForm(false);
       setFormModeloSel(-1);
       onToast('ok', 'Entrada guardada');
     }
@@ -964,7 +1091,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   const getGridInfo = (i: number) => {
     const r = grid[i];
     const o: any = { err: [], warn: [] };
-    const vacia = !r.op && !r.u && !r.c;
+    const vacia = !r.op && !r.u && !r.c && !(r.sap || '').trim();
     o.vacia = vacia;
     if (vacia) return o;
 
@@ -977,9 +1104,10 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     if (o.m) {
       const ms = o.m.modelos || [];
       if (!ms.length) {
+        sap = o.m.sap || '';
         desc = o.m.descripcion || '';
       } else if (ms.length === 1) {
-        sap = ms[0].sap || '';
+        sap = ms[0].sap || o.m.sap || '';
         desc = ms[0].descripcion || '';
       } else if (r.mod === 'all') {
         sap = ms.map((x: any) => x.sap || '').filter(Boolean).join(' + ');
@@ -991,14 +1119,58 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
           desc = x.descripcion || '';
         }
       }
+    } else {
+      sap = (r.sap || '').trim();
+      if (!sap && op) {
+        const prevRec = registros.find((x) => x.op.trim().toLowerCase() === op.toLowerCase() && x.sap);
+        if (prevRec) sap = prevRec.sap;
+      }
+      if (sap) {
+        desc = buscarSap(sap, catalogo, registros);
+      }
     }
     o.mo = { sap, desc };
 
-    const pedPlan = sap ? pedidoPlanSap(sap, fdesp, planes) : 0;
+    // Compare OP's SAP against SAPs scheduled for dispatch
+    const sapInfo = sap ? compararSapConDespacho(sap, fdesp, registros, planes, op) : null;
+    o.sapInfo = sapInfo;
+
+    const rowSaps = extraerSaps(sap);
+    let sapPrevGrid = 0;
+    for (let j = 0; j < i; j++) {
+      const g = grid[j];
+      const gOp = g.op.trim();
+      if (!gOp && !g.u && !g.c) continue;
+      const gCat = buscarCatalogo(gOp);
+      let gSap = (g.sap || '').trim();
+      if (gCat) {
+        const gms = gCat.modelos || [];
+        if (gms.length === 1) gSap = gms[0].sap || gCat.sap || '';
+        else if (g.mod === 'all') gSap = gms.map((x: any) => x.sap || '').filter(Boolean).join(' + ');
+        else if (gms[parseInt(g.mod, 10)]) gSap = gms[parseInt(g.mod, 10)].sap || '';
+      }
+      const gSaps = extraerSaps(gSap);
+      if (rowSaps.length && gSaps.some((s) => rowSaps.includes(s))) {
+        sapPrevGrid += (parseInt(g.u, 10) || 0) * (parseInt(g.c, 10) || 0);
+      }
+    }
+    o.sapPrevGrid = sapPrevGrid;
+
+    const pedPlanOpVal = pedidoPlanOp(op, fdesp, planesOp);
+    const ultPedVal = ultimoPedido(op, fdesp, registros);
+    let pedAutoSap = 0;
+    if (sapInfo && sapInfo.enDespacho && sapInfo.pedidoSap > 0) {
+      const pendAntesDeFila = Math.max(
+        sapInfo.pedidoSap - (sapInfo.cubiertoOtrasOps + sapPrevGrid),
+        0
+      );
+      pedAutoSap = pendAntesDeFila > 0 ? pendAntesDeFila : sapInfo.pedidoSap;
+    }
+
     o.ped =
       r.pedido !== ''
         ? parseInt(r.pedido, 10) || 0
-        : pedidoDe(op, fdesp, registros, catalogo, planesOp, planes) || pedPlan || 0;
+        : pedPlanOpVal || ultPedVal || pedAutoSap || pedidoDe(op, fdesp, registros, catalogo, planesOp, planes, sap) || 0;
     o.total = (parseInt(r.u, 10) || 0) * (parseInt(r.c, 10) || 0);
 
     let prev = acumulado(op, fdesp, registros);
@@ -1022,6 +1194,26 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     if (r.pedido !== '' && !esEntero(r.pedido)) o.err.push('Pedido no entero');
 
     avisoCant(parseInt(r.u, 10) || 0, parseInt(r.c, 10) || 0).forEach((a) => o.warn.push(a));
+
+    // Check against loaded SAP plan
+    const hasSapPlan = Boolean(planes[fdesp]?.items?.length);
+    if (hasSapPlan) {
+      if (!sap) {
+        o.warn.push('Sin código SAP para comparar con despacho');
+      } else if (!sapInfo?.enPlanSap) {
+        o.warn.push(`SAP ${sap} no está en lista de despacho`);
+      }
+    }
+
+    if (sapInfo?.enDespacho && sapInfo.pedidoSap > 0) {
+      const finSap = sapInfo.acumuladoSap + sapPrevGrid + o.total;
+      o.sapEnDespacho = true;
+      o.sapCompleta = finSap >= sapInfo.pedidoSap;
+      o.sapFalta = Math.max(sapInfo.pedidoSap - finSap, 0);
+      if (finSap > sapInfo.pedidoSap && (sapInfo.otrasOps.length > 0 || sapPrevGrid > 0)) {
+        o.warn.push(`Excede SAP ${sap} en ${finSap - sapInfo.pedidoSap} u`);
+      }
+    }
 
     const pp0 = ultimoPedido(op, fdesp, registros);
     if (r.pedido !== '' && pp0 > 0 && pp0 !== o.ped) {
@@ -1075,11 +1267,23 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
         updated[i].op = m.op;
       }
       updated[i].pedido = '';
-      updated[i].mod = 'all';
+      updated[i].sap = '';
+      if (m && m.modelos && m.modelos.length > 1) {
+        const matchingIdxs = m.modelos
+          .map((mo, idx) => ({
+            idx,
+            match: mo.sap ? compararSapConDespacho(mo.sap, fdesp, registros, planes, m.op)?.enDespacho : false,
+          }))
+          .filter((x) => x.match)
+          .map((x) => x.idx);
+        updated[i].mod = matchingIdxs.length === 1 ? String(matchingIdxs[0]) : 'all';
+      } else {
+        updated[i].mod = 'all';
+      }
     }
 
     // Auto-append row if typing in last row
-    if (i === updated.length - 1 && (updated[i].op || updated[i].u || updated[i].c)) {
+    if (i === updated.length - 1 && (updated[i].op || updated[i].u || updated[i].c || updated[i].sap)) {
       updated.push({ op: '', mod: 'all', pedido: '', emp: 'caja', u: '', c: '' });
     }
 
@@ -1107,7 +1311,19 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       const m = buscarCatalogo(c[0]);
       updated[rowIdx].op = m ? m.op : String(c[0] || '').trim();
       updated[rowIdx].pedido = '';
-      updated[rowIdx].mod = 'all';
+      updated[rowIdx].sap = '';
+      if (m && m.modelos && m.modelos.length > 1) {
+        const matchingIdxs = m.modelos
+          .map((mo, idx) => ({
+            idx,
+            match: mo.sap ? compararSapConDespacho(mo.sap, fdesp, registros, planes, m.op)?.enDespacho : false,
+          }))
+          .filter((x) => x.match)
+          .map((x) => x.idx);
+        updated[rowIdx].mod = matchingIdxs.length === 1 ? String(matchingIdxs[0]) : 'all';
+      } else {
+        updated[rowIdx].mod = 'all';
+      }
       if (c[1] != null && c[1] !== '') {
         updated[rowIdx].u = String(parseInt(c[1], 10) || '');
       }
@@ -1133,9 +1349,15 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       return;
     }
     const vistos: Record<string, boolean> = {};
+    const sapsEnTabla = new Set<string>();
     const ops: string[] = [];
     grid.forEach((r) => {
-      if (r.op) vistos[r.op.toLowerCase()] = true;
+      if (r.op) {
+        vistos[r.op.toLowerCase()] = true;
+        const m = buscarCatalogo(r.op);
+        sapsDeCatalogoOp(m).forEach((s) => sapsEnTabla.add(s));
+        if (r.sap) extraerSaps(r.sap).forEach((s) => sapsEnTabla.add(s));
+      }
     });
 
     const add = (op: string) => {
@@ -1144,6 +1366,17 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       vistos[k] = true;
       const p = pedidoDe(op, fdesp, registros, catalogo, planesOp, planes);
       if (p && acumulado(op, fdesp, registros) >= p) return;
+      // If SAP dispatch plan is loaded and this OP's SAP is already 100% covered in fdesp, skip
+      if (planes[fdesp]?.items?.length) {
+        const m = buscarCatalogo(op);
+        const opSaps = sapsDeCatalogoOp(m);
+        if (opSaps.length) {
+          const sapInfo = compararSapConDespacho(opSaps.join(' + '), fdesp, registros, planes);
+          if (sapInfo && sapInfo.enPlanSap && sapInfo.pedidoSap > 0 && sapInfo.pendienteSap === 0) {
+            return;
+          }
+        }
+      }
       ops.push(String(op).trim());
     };
 
@@ -1154,8 +1387,26 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       .slice()
       .reverse()
       .forEach((x) => {
-        if ((x.fdesp || '') === fdesp) add(x.op);
+        if ((x.fdesp || '') === fdesp) {
+          add(x.op);
+          extraerSaps(x.sap).forEach((s) => sapsEnTabla.add(s));
+        }
       });
+
+    // Also include catalog OPs for pending SAP items from planes[fdesp] that don't have an OP yet
+    if (planes[fdesp]?.items?.length) {
+      planes[fdesp].items.forEach((it) => {
+        const sapUpper = String(it.sap || '').trim().toUpperCase();
+        if (!sapUpper || sapsEnTabla.has(sapUpper)) return;
+        const info = compararSapConDespacho(sapUpper, fdesp, registros, planes);
+        if (info && info.pedidoSap > 0 && info.pendienteSap === 0) return;
+        const matches = opsDeSap(sapUpper, catalogo);
+        if (matches.length) {
+          add(matches[0].m.op);
+          sapsEnTabla.add(sapUpper);
+        }
+      });
+    }
 
     if (!ops.length) {
       onToast('error', `No hay OPs pendientes para el ${fcorta(fdesp)}`);
@@ -1165,9 +1416,20 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     const clean = grid.filter((r) => r.op || r.u || r.c);
     ops.forEach((op) => {
       const m = buscarCatalogo(op);
+      let mod = 'all';
+      if (m && m.modelos && m.modelos.length > 1) {
+        const matchingIdxs = m.modelos
+          .map((mo, idx) => ({
+            idx,
+            match: mo.sap ? compararSapConDespacho(mo.sap, fdesp, registros, planes, m.op)?.enDespacho : false,
+          }))
+          .filter((x) => x.match)
+          .map((x) => x.idx);
+        if (matchingIdxs.length === 1) mod = String(matchingIdxs[0]);
+      }
       clean.push({
         op: m ? m.op : op,
-        mod: 'all',
+        mod,
         pedido: '',
         emp: 'caja',
         u: '',
@@ -1184,15 +1446,15 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   const handleGuardarGrid = () => {
     if (gridSavePending) return;
     if (!fdesp) {
-      onToast('error', 'Pon la fecha de despacho');
+      onToast('error', 'Por favor ingresa la fecha de despacho');
       return;
     }
     if (!fecha) {
-      onToast('error', 'Pon la fecha de registro');
+      onToast('error', 'Por favor ingresa la fecha de registro');
       return;
     }
     if (!nombre) {
-      onToast('error', 'Selecciona el habilitador');
+      onToast('error', 'Por favor selecciona el habilitador');
       return;
     }
 
@@ -1217,14 +1479,14 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     });
 
     if (!okList.length) {
-      onToast('error', 'Ninguna fila está lista. Revisa las marcadas en rojo');
+      onToast('error', 'Ninguna fila está lista para guardar. Por favor revisa las filas marcadas con errores en rojo');
       return;
     }
 
     if (avisos.length && !confirmarAvisos(avisos)) return;
     if (
       !window.confirm(
-        `Se guardarán ${okList.length} registro(s) para el despacho del ${fcorta(fdesp)}${errs ? `\n(${errs} fila(s) con errores quedan en la tabla)` : ''}.\n¿Confirmar?`
+        `Se guardarán ${okList.length} registro(s) para el despacho del ${fcorta(fdesp)}${errs ? `\n(${errs} fila(s) con errores quedan pendientes en la tabla)` : ''}.\n¿Deseas confirmar y guardar?`
       )
     ) {
       return;
@@ -1246,7 +1508,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
         turno,
         nombre,
         op,
-        sap: o.mo ? o.mo.sap : '',
+        sap: o.mo?.sap || (r.sap || '').trim(),
         descripcion: o.mo ? o.mo.desc : '',
         cliente: o.m ? o.m.cliente || '' : '',
         pedido: o.ped,
@@ -1311,6 +1573,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     0
   );
   const groupedSub = agrupar(sub, registros, planesOp, opExtra);
+  const sapSummary = resumenSapsDespacho(fdesp, registros, planes, opExtra, catalogo);
 
   // Suggestions list for OP input
   const sugList = formOp.trim()
@@ -1500,6 +1763,12 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
               <tbody>
                 {grid.map((r, i) => {
                   const o = getGridInfo(i);
+                  const sapTag =
+                    o.sapEnDespacho && !o.vacia
+                      ? o.sapCompleta
+                        ? 'Completa SAP'
+                        : `Faltan ${o.sapFalta} u SAP`
+                      : '';
                   const msg = o.vacia
                     ? ''
                     : o.err.length
@@ -1507,8 +1776,10 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                     : o.warn.length
                     ? o.warn.join(' · ')
                     : o.cierra
-                    ? 'Listo · completa la OP'
-                    : 'Listo' + (o.falta ? ` · faltan ${o.falta}` : '');
+                    ? `Listo · completa la OP${sapTag ? ` (${sapTag})` : ''}`
+                    : 'Listo' +
+                      (o.falta ? ` · faltan ${o.falta}` : '') +
+                      (sapTag ? ` · ${sapTag}` : '');
 
                   const rowClass = o.vacia
                     ? ''
@@ -1538,18 +1809,56 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                             onChange={(e) => updateGridRow(i, 'mod', e.target.value)}
                           >
                             <option value="all">Todos juntos</option>
-                            {o.m.modelos.map((mo: any, k: number) => (
-                              <option key={k} value={String(k)}>
-                                {mo.modelo || mo.descripcion}
-                              </option>
-                            ))}
+                            {o.m.modelos.map((mo: any, k: number) => {
+                              const moMatch = mo.sap
+                                ? compararSapConDespacho(mo.sap, fdesp, registros, planes, o.m.op)?.enDespacho
+                                : false;
+                              return (
+                                <option key={k} value={String(k)}>
+                                  {moMatch ? '✓ ' : ''}
+                                  {mo.modelo || mo.descripcion}
+                                </option>
+                              );
+                            })}
                           </select>
                         ) : (
                           <span style={{ color: 'var(--muted)', fontSize: '0.72rem' }}>—</span>
                         )}
                       </td>
                       <td className="ro cli">{o.m?.cliente || ''}</td>
-                      <td className="ro mono sap">{o.mo?.sap || ''}</td>
+                      <td className="ro mono sap">
+                        {o.m ? (
+                          <div>
+                            <div>{o.mo?.sap || ''}</div>
+                            {!o.vacia && o.sapInfo?.enDespacho && (
+                              <div
+                                style={{
+                                  fontSize: '0.66rem',
+                                  color: 'var(--green)',
+                                  fontWeight: 700,
+                                  lineHeight: 1.1,
+                                }}
+                                title={
+                                  o.sapInfo.otrasOps.length
+                                    ? `Mismo SAP que: ${o.sapInfo.otrasOps.map((x: any) => x.op).join(', ')}`
+                                    : 'SAP en despacho'
+                                }
+                              >
+                                ✓ Despacho{o.sapInfo.otrasOps.length ? ' (comp.)' : ''}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <input
+                            className="mono"
+                            style={{ width: '92px', fontSize: '0.78rem' }}
+                            placeholder="SAP"
+                            value={r.sap || ''}
+                            onChange={(e) => updateGridRow(i, 'sap', e.target.value)}
+                            title="Ingresa el código SAP para compararlo con el despacho"
+                          />
+                        )}
+                      </td>
                       <td className="ro desc" title={o.mo?.desc || ''}>
                         {o.mo?.desc || ''}
                       </td>
@@ -1700,19 +2009,36 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                   >
                     Todos juntos
                   </button>
-                  {buscarCatalogo(formOp)?.modelos.map((mo, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      className={`chip ${formModeloSel === i ? 'active' : ''}`}
-                      style={{ flex: '0 0 auto' }}
-                      onClick={() =>
-                        handleSelectModeloForm(i, buscarCatalogo(formOp)!)
-                      }
-                    >
-                      {mo.modelo || mo.descripcion}
-                    </button>
-                  ))}
+                  {buscarCatalogo(formOp)?.modelos.map((mo, i) => {
+                    const moEnDesp = mo.sap
+                      ? compararSapConDespacho(mo.sap, fdesp, registros, planes, formOp)?.enDespacho
+                      : false;
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        className={`chip ${formModeloSel === i ? 'active' : ''}`}
+                        style={{ flex: '0 0 auto' }}
+                        onClick={() =>
+                          handleSelectModeloForm(i, buscarCatalogo(formOp)!)
+                        }
+                      >
+                        {mo.modelo || mo.descripcion}
+                        {moEnDesp && (
+                          <span
+                            style={{
+                              marginLeft: '6px',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              color: formModeloSel === i ? 'inherit' : 'var(--green)',
+                            }}
+                          >
+                            ✓ SAP en despacho
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
 
@@ -1740,12 +2066,106 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                 <input
                   type="text"
                   className="mono"
-                  placeholder="Según modelo"
+                  placeholder="Según modelo o manual"
                   value={formSap}
-                  onChange={(e) => setFormSap(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormSap(val);
+                    if (!opAplicada && !formDesc.trim() && val.trim()) {
+                      const d = buscarSap(val, catalogo, registros);
+                      if (d) setFormDesc(d);
+                    }
+                  }}
                 />
               </div>
             </div>
+
+            {/* SAP Dispatch Comparison Banner */}
+            {formOp.trim() && formSapInfo && formSapInfo.enDespacho && (
+              <div
+                style={{
+                  background: 'rgba(56, 161, 105, 0.1)',
+                  border: '1px solid var(--green)',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  marginTop: '4px',
+                  fontSize: '0.82rem',
+                  lineHeight: 1.45,
+                }}
+              >
+                <div style={{ fontWeight: 700, color: 'var(--green)', marginBottom: '4px' }}>
+                  🎯 SAP {formSapInfo.sap} tomado en cuenta para despacho ({fcorta(fdesp)})
+                </div>
+                <div>
+                  Pedido SAP: <strong>{formSapInfo.pedidoSap} u</strong> · Ya cubierto:{' '}
+                  <strong>{formSapInfo.acumuladoSap} u</strong> · Pendiente SAP:{' '}
+                  <strong>{formSapInfo.pendienteSap} u</strong>
+                  {formSapInfo.stockPlanSinReg > 0 && (
+                    <span> · Stock en lista SAP (sin asignar): <strong>{formSapInfo.stockPlanSinReg} u</strong></span>
+                  )}
+                </div>
+                {formSapInfo.otrasOps.length > 0 && (
+                  <div style={{ marginTop: '3px', color: 'var(--muted2)' }}>
+                    Mismo SAP ya en despacho con:{' '}
+                    <strong>
+                      {formSapInfo.otrasOps.map((x) => `${x.op} (${x.acum} u)`).join(', ')}
+                    </strong>
+                  </div>
+                )}
+                {formTotalCalc > 0 && formSapInfo.pedidoSap > 0 && (
+                  <div style={{ marginTop: '4px', fontWeight: 600 }}>
+                    Con esta entrega (+{formTotalCalc} u) → SAP quedará en{' '}
+                    <strong>
+                      {formSapInfo.acumuladoSap + formTotalCalc} / {formSapInfo.pedidoSap} u
+                    </strong>{' '}
+                    {formSapInfo.acumuladoSap + formTotalCalc === formSapInfo.pedidoSap ? (
+                      <span style={{ color: 'var(--green)' }}>(✓ Completa el SAP)</span>
+                    ) : formSapInfo.acumuladoSap + formTotalCalc > formSapInfo.pedidoSap ? (
+                      <span style={{ color: 'var(--red)' }}>
+                        (Excede en {formSapInfo.acumuladoSap + formTotalCalc - formSapInfo.pedidoSap} u)
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--muted)' }}>
+                        (Faltarán {formSapInfo.pedidoSap - (formSapInfo.acumuladoSap + formTotalCalc)} u)
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {formOp.trim() && currentPlan && currentPlan.items.length > 0 && formSap.trim() && formSapInfo && !formSapInfo.enPlanSap && (
+              <div
+                style={{
+                  background: 'rgba(229, 62, 62, 0.08)',
+                  border: '1px solid var(--red)',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  marginTop: '4px',
+                  fontSize: '0.82rem',
+                  color: 'var(--red)',
+                  fontWeight: 600,
+                }}
+              >
+                ⚠️ El código SAP <span className="mono">{formSap.trim()}</span> de esta OP no figura en la lista de SAP a despachar del {fcorta(fdesp)}.
+              </div>
+            )}
+
+            {formOp.trim() && currentPlan && currentPlan.items.length > 0 && !formSap.trim() && (
+              <div
+                style={{
+                  background: 'var(--alt)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '10px',
+                  padding: '8px 12px',
+                  marginTop: '4px',
+                  fontSize: '0.8rem',
+                  color: 'var(--muted)',
+                }}
+              >
+                ℹ️ Hay una lista de despacho por SAP cargada. Selecciona el modelo o ingresa el código SAP para compararlo con los SAP a despachar.
+              </div>
+            )}
           </div>
 
           <div className="fcol">
@@ -1758,7 +2178,10 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                 className="mono"
                 placeholder="0"
                 value={formPedido}
-                onChange={(e) => setFormPedido(e.target.value)}
+                onChange={(e) => {
+                  setPedidoManualForm(true);
+                  setFormPedido(e.target.value);
+                }}
               />
             </div>
 
@@ -2061,64 +2484,115 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                         </label>
                       </td>
                       <td className="k">
-                        {enProd ? (
-                          <div>
-                            <span className="badge b-ENPRODUCCION">EN PRODUCCIÓN</span>
-                            {o.pedido > 0 && (
-                              <div
-                                style={{
-                                  fontSize: '0.72rem',
-                                  marginTop: '3px',
-                                  fontWeight: 600,
-                                  color: ok ? 'var(--green)' : 'var(--muted)',
-                                }}
-                              >
-                                {ok
-                                  ? pd < 0
-                                    ? `Cubierto (+${-pd})`
-                                    : 'Cubierto'
-                                  : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
-                              </div>
-                            )}
-                          </div>
-                        ) : o.pedido > 0 ? (
-                          <div>
-                            <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
-                              {ok
-                                ? pd < 0
-                                  ? `COMPLETO (+${-pd})`
-                                  : 'COMPLETO'
-                                : `Faltan ${pd}`}
-                            </span>
-                            {cantPlanta > 0 && !ok && (
-                              <div
-                                style={{
-                                  fontSize: '0.72rem',
-                                  marginTop: '3px',
-                                  color: 'var(--blue)',
-                                  fontWeight: 600,
-                                }}
-                              >
-                                🏭 {cantPlanta} u en planta
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          cantPlanta > 0 && (
-                            <span
-                              style={{
-                                fontSize: '0.76rem',
-                                color: 'var(--blue)',
-                                fontWeight: 600,
-                              }}
-                            >
-                              🏭 {cantPlanta} u en planta
-                            </span>
-                          )
-                        )}
+                        {(() => {
+                          const sapsDeOp = Object.keys(o.lineas)
+                            .map((k) => o.lineas[k].sap)
+                            .filter(Boolean)
+                            .join(' + ');
+                          const sapCheck = sapsDeOp
+                            ? compararSapConDespacho(sapsDeOp, o.fdesp, registros, planes, o.op)
+                            : null;
+                          const sapCubiertoPorOtras =
+                            sapCheck &&
+                            sapCheck.otrasOps.length > 0 &&
+                            sapCheck.pedidoSap > 0 &&
+                            sapCheck.acumuladoSap >= sapCheck.pedidoSap;
+
+                          return (
+                            <>
+                              {enProd ? (
+                                <div>
+                                  <span className="badge b-ENPRODUCCION">EN PRODUCCIÓN</span>
+                                  {o.pedido > 0 && (
+                                    <div
+                                      style={{
+                                        fontSize: '0.72rem',
+                                        marginTop: '3px',
+                                        fontWeight: 600,
+                                        color: ok ? 'var(--green)' : 'var(--muted)',
+                                      }}
+                                    >
+                                      {ok
+                                        ? pd < 0
+                                          ? `Cubierto (+${-pd})`
+                                          : 'Cubierto'
+                                        : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : o.pedido > 0 ? (
+                                <div>
+                                  <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
+                                    {ok
+                                      ? pd < 0
+                                        ? `COMPLETO (+${-pd})`
+                                        : 'COMPLETO'
+                                      : `Faltan ${pd}`}
+                                  </span>
+                                  {cantPlanta > 0 && !ok && (
+                                    <div
+                                      style={{
+                                        fontSize: '0.72rem',
+                                        marginTop: '3px',
+                                        color: 'var(--blue)',
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      🏭 {cantPlanta} u en planta
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                cantPlanta > 0 && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.76rem',
+                                      color: 'var(--blue)',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    🏭 {cantPlanta} u en planta
+                                  </span>
+                                )
+                              )}
+                              {sapCubiertoPorOtras && !ok && (
+                                <div
+                                  style={{
+                                    fontSize: '0.7rem',
+                                    marginTop: '3px',
+                                    color: 'var(--green)',
+                                    fontWeight: 700,
+                                  }}
+                                  title={`Completado junto con ${sapCheck!.otrasOps.map((x) => x.op).join(', ')}`}
+                                >
+                                  ✓ SAP cubierto ({sapCheck!.acumuladoSap}/{sapCheck!.pedidoSap} u)
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </td>
                       <td className="actions" style={{ whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'inline-flex', gap: '4px', justifyContent: 'flex-end' }}>
+                          <button
+                            className="stock-btn"
+                            type="button"
+                            onClick={() =>
+                              setEntregasModalOp({
+                                op: o.op,
+                                fdesp: o.fdesp,
+                                cliente: o.cliente,
+                                pedido: o.pedido,
+                                stock: o.stock,
+                              })
+                            }
+                            title="Ver y borrar entregas individuales de esta OP"
+                            style={{
+                              borderColor: 'var(--amber)',
+                            }}
+                          >
+                            👁️ Entregas
+                          </button>
                           <button
                             className="stock-btn"
                             type="button"
@@ -2165,6 +2639,231 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
         </div>
       )}
 
+      {/* Comparativo de Códigos SAP a Despachar (unifica múltiples OPs del mismo SAP) */}
+      {sapSummary.length > 0 && (
+        <div id="despachoResSap" className="panel" style={{ padding: '16px', marginTop: '12px' }}>
+          <div
+            className="sec"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '8px',
+              marginBottom: '12px',
+            }}
+          >
+            <span>🎯 Comparativo por Código SAP a Despachar ({sapSummary.length} SAPs)</span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+              Agrupa todas las OPs con el mismo código SAP para controlar el avance real de almacén
+            </span>
+          </div>
+
+          <div className="table-wrap">
+            <table className="list-table">
+              <thead>
+                <tr>
+                  <th>SAP</th>
+                  <th>Descripción</th>
+                  <th>OPs en despacho</th>
+                  <th className="n">Pedido SAP</th>
+                  <th className="n">Stock inicial</th>
+                  <th className="n">Entregado</th>
+                  <th className="n">Acumulado</th>
+                  <th className="n">Pendiente</th>
+                  <th className="n">Excedente</th>
+                  <th className="k">Estado SAP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sapSummary.map((s) => (
+                  <tr key={s.sap}>
+                    <td>
+                      <span
+                        className="mono"
+                        style={{
+                          fontWeight: 700,
+                          background: 'var(--alt)',
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        {s.sap}
+                      </span>
+                      {s.enPlanSap && (
+                        <div style={{ fontSize: '0.68rem', color: 'var(--muted)', marginTop: '2px' }}>
+                          En lista SAP
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ fontSize: '0.82rem' }}>{s.desc || '—'}</td>
+                    <td style={{ fontSize: '0.82rem' }}>
+                      {s.ops.length > 0 ? (
+                        <div>
+                          {s.ops.map((opItem) => (
+                            <div key={opItem.op} style={{ marginBottom: '2px' }}>
+                              <span className="mono" style={{ fontWeight: 700 }}>
+                                {opItem.op}
+                              </span>
+                              : {opItem.ent} u
+                              {opItem.stock > 0 ? ` + ${opItem.stock} stk` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
+                          Sin entregas aún
+                          {s.catalogoOps.length > 0 && ` (Catálogo: ${s.catalogoOps.join(', ')})`}
+                        </span>
+                      )}
+                    </td>
+                    <td className="n mono">{s.pedidoSap || 0}</td>
+                    <td className="n mono">
+                      {s.stockRegistrado > 0
+                        ? `${s.stockRegistrado} u`
+                        : s.stockPlanSinReg > 0
+                        ? `${s.stockPlanSinReg} u (plan)`
+                        : '—'}
+                    </td>
+                    <td className="n mono">
+                      <strong>{s.entregado} u</strong>
+                    </td>
+                    <td className="n mono">
+                      <strong>{s.acumulado} u</strong>
+                    </td>
+                    <td className="n mono">{s.pendiente > 0 ? `${s.pendiente} u` : '0'}</td>
+                    <td className="n mono">
+                      {s.excedente > 0 ? (
+                        <span style={{ color: 'var(--red)', fontWeight: 700 }}>
+                          {s.excedente} u
+                        </span>
+                      ) : (
+                        '0'
+                      )}
+                    </td>
+                    <td className="k">
+                      {s.estado ? (
+                        <span className={`badge b-${s.estado.replace(/\s+/g, '')}`}>
+                          {s.estado === 'COMPLETO' && s.excedente > 0
+                            ? `COMPLETO (+${s.excedente})`
+                            : s.estado === 'INCOMPLETO' && s.pendiente > 0
+                            ? `Faltan ${s.pendiente}`
+                            : s.estado === 'EN PRODUCCION'
+                            ? 'EN PRODUCCIÓN'
+                            : s.estado}
+                        </span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Lista de entregas individuales registradas para este despacho */}
+      {sub.filter((r) => !esStock(r)).length > 0 && (
+        <div id="entregasDespachoLista" className="panel" style={{ padding: '16px', marginTop: '14px' }}>
+          <div
+            className="sec"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '8px',
+              marginBottom: '12px',
+            }}
+          >
+            <span>
+              📋 Entregas registradas en este despacho ({sub.filter((r) => !esStock(r)).length} entrada{sub.filter((r) => !esStock(r)).length !== 1 ? 's' : ''})
+            </span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+              ¿Error de ingreso? Haz clic en 🗑️ Borrar para eliminar cualquier registro erróneo
+            </span>
+          </div>
+
+          <div className="table-wrap">
+            <table className="list-table">
+              <thead>
+                <tr>
+                  <th className="k">#</th>
+                  <th>Fecha reg.</th>
+                  <th>Turno</th>
+                  <th>Habilitador</th>
+                  <th className="th-op">OP</th>
+                  <th>Cliente</th>
+                  <th>SAP / Descripción</th>
+                  <th>Empaque & Detalle</th>
+                  <th className="n">Total</th>
+                  <th className="k">Sync</th>
+                  <th style={{ textAlign: 'right' }}>Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sub
+                  .filter((r) => !esStock(r))
+                  .map((r, idx) => {
+                    const n =
+                      r.empaque === 'caja'
+                        ? r.c === 1
+                          ? 'caja'
+                          : 'cajas'
+                        : r.c === 1
+                        ? 'paquete'
+                        : 'paquetes';
+
+                    return (
+                      <tr key={r.id}>
+                        <td className="k" style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
+                          {idx + 1}
+                        </td>
+                        <td className="mono">{fcorta(r.fecha)}</td>
+                        <td>{r.turno}</td>
+                        <td>{r.nombre}</td>
+                        <td className="td-op op-cell">
+                          <span className="op mono">{r.op}</span>
+                        </td>
+                        <td>{r.cliente || '—'}</td>
+                        <td>
+                          <div style={{ fontWeight: 500 }}>{r.descripcion || '—'}</div>
+                          {r.sap && (
+                            <div className="mono" style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>
+                              SAP {r.sap}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '0.82rem', color: 'var(--muted2)' }}>
+                          {r.c} {n} × {r.u}
+                        </td>
+                        <td className="n mono">
+                          <strong>{r.total || 0} u</strong>
+                        </td>
+                        <td className="k" title={r.sync ? 'Sincronizado' : 'Pendiente'}>
+                          {r.sync ? '☁️' : '⏳'}
+                        </td>
+                        <td className="actions" style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="del-btn"
+                            onClick={() => handleBorrarRegistro(r)}
+                            title="Eliminar esta entrega por error de ingreso"
+                          >
+                            🗑️ Borrar
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Confirmation Modal for Excel import */}
       {confirmModalData && (
         <ConfirmarListaModal
@@ -2198,6 +2897,24 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
           stock={plantaEditModal.stock}
           onSave={handleSavePlantaModal}
           onClose={() => setPlantaEditModal(null)}
+        />
+      )}
+
+      {entregasModalOp && (
+        <EntregasOpModal
+          op={entregasModalOp.op}
+          fdesp={entregasModalOp.fdesp}
+          cliente={entregasModalOp.cliente}
+          pedido={entregasModalOp.pedido}
+          stock={entregasModalOp.stock}
+          entregas={registros.filter(
+            (r) =>
+              r.op.trim().toLowerCase() === entregasModalOp.op.trim().toLowerCase() &&
+              (r.fdesp || r.fecha || '').trim() === entregasModalOp.fdesp.trim()
+          )}
+          onDeleteRegistro={handleBorrarRegistro}
+          onDeleteAllForOp={() => handleBorrarTodasOp(entregasModalOp.op, entregasModalOp.fdesp)}
+          onClose={() => setEntregasModalOp(null)}
         />
       )}
     </div>
