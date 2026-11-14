@@ -3,11 +3,10 @@ import { CatalogoOp, Ingreso, PlanDespacho, PlanOp, Registro } from '../types';
 import {
   agruparReporte,
   compararSapConDespacho,
+  consolidarOpsPorSap,
   entregasReales,
-  estadoDe,
   estadoReg,
   fcorta,
-  norm,
 } from '../utils/helpers';
 
 function xe(v: any): string {
@@ -195,46 +194,29 @@ export function xmlEntregas(
     ]),
   ];
 
-  g.ops.forEach((o) => {
-    const pd = o.pedido - o.acum;
-    const ex = o.pedido > 0 ? Math.max(-pd, 0) : 0;
-    let es = estadoDe(o.op, o.fdesp, registrosContext, planesOp, opExtra);
-    const cantPl = o.cantPlanta || 0;
-    const enPr = Boolean(o.enProduccion);
-    const sapsDeOp = Object.keys(o.lineas)
-      .map((k) => o.lineas[k].sap)
-      .filter(Boolean)
-      .join(' + ');
-    const sapCheck = sapsDeOp
-      ? compararSapConDespacho(sapsDeOp, o.fdesp, registrosContext, planes || {}, o.op)
-      : null;
-    const sapCubierto = Boolean(
-      sapCheck &&
-        sapCheck.otrasOps.length > 0 &&
-        sapCheck.pedidoSap > 0 &&
-        sapCheck.acumuladoSap >= sapCheck.pedidoSap
-    );
-    const faltVal = sapCubierto ? 0 : Math.max(pd, 0);
-    let esLabel = es;
-    if (sapCubierto && pd > 0 && !enPr) {
-      es = 'COMPLETO';
-      esLabel = 'COMPLETO (SAP)';
-    }
+  const opsConsolidadas = consolidarOpsPorSap(g.ops, planes);
+  opsConsolidadas.forEach((o) => {
+    const descExcel = o.esGrupoSap
+      ? `${o.desc} (${o.opsMiembros
+          .map((m) => `${m.op}: ${m.ent}u${m.stock ? `+${m.stock}stk` : ''}`)
+          .join(' + ')})`
+      : o.desc;
+    const esLabel = o.estado === 'EN PRODUCCION' ? 'EN PRODUCCIÓN' : o.estado;
     r2.push(
       '<Row>' +
         ce(fcorta(o.fdesp), 'sK') +
         ce(o.op, 'sK') +
         ce(o.cliente, 'sC') +
-        ce(o.desc, 'sC') +
+        ce(descExcel, 'sC') +
         ce(o.pedido, 'sP', true) +
         ce(o.stock || 0, 'sN', true) +
         ce(o.entF, 'sE', true) +
         ce(o.acum, 'sN', true) +
-        ce(faltVal, faltVal > 0 ? 'sP' : 'sE', true) +
-        ce(ex, ex > 0 ? 'sX' : 'sN', true) +
-        ce(cantPl, cantPl > 0 ? 'sPr' : 'sN', true) +
-        ce(enPr ? 'SÍ' : 'NO', enPr ? 'sPr' : 'sK') +
-        ce(esLabel, EST_STYLE[es] || 'sK') +
+        ce(o.falt, o.falt > 0 ? 'sP' : 'sE', true) +
+        ce(o.exc, o.exc > 0 ? 'sX' : 'sN', true) +
+        ce(o.cantPlanta, o.cantPlanta > 0 ? 'sPr' : 'sN', true) +
+        ce(o.enProduccion ? 'SÍ' : 'NO', o.enProduccion ? 'sPr' : 'sK') +
+        ce(esLabel, EST_STYLE[o.estado] || 'sK') +
         '</Row>'
     );
   });
@@ -271,7 +253,7 @@ export function xmlEntregas(
         (x.conj ? ce('—', 'sK') : ce(x.falt, (x.falt ?? 0) > 0 ? 'sP' : 'sE', true)) +
         (x.conj ? ce('—', 'sK') : ce(x.exc, (x.exc ?? 0) > 0 ? 'sX' : 'sN', true)) +
         ce(x.estado || '', EST_STYLE[x.estado || ''] || 'sK') +
-        ce(Object.keys(x.ops).join(', '), 'sC') +
+        ce(Object.keys(x.ops).join(' / '), 'sC') +
         '</Row>'
     );
   });

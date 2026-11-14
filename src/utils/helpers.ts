@@ -725,12 +725,13 @@ export function agruparReporte(
     let inc = false;
     let comp = false;
     let enProd = false;
+    const sapOpsList: GrupoOp[] = [];
 
     Object.keys(opsK).forEach((k) => {
       const o = g.ops.find((q) => q.op.trim().toLowerCase() === k && q.fdesp === x.fdesp);
       if (!o) return;
+      sapOpsList.push(o);
       if (o.nsap && o.nsap > 1) conj = true;
-      else ped += o.pedido;
       if (o.enProduccion) enProd = true;
       const e = estadoDe(o.op, o.fdesp, todosRegistros, planesOp, opExtra);
       if (e === 'INCOMPLETO') inc = true;
@@ -743,6 +744,8 @@ export function agruparReporte(
     if (planSapCant > 0) {
       ped = planSapCant;
       conj = false;
+    } else if (!conj && sapOpsList.length > 0) {
+      ped = calcularPedidoCompartido(sapOpsList, acum);
     }
 
     x.ord = m.ord;
@@ -787,6 +790,186 @@ export function agruparReporte(
   g.ops.sort(cmpCarga);
   g.saps.sort(cmpCarga);
   return g;
+}
+
+export function calcularPedidoCompartido(opsList: GrupoOp[], acumTotal: number): number {
+  if (!opsList.length) return 0;
+  if (opsList.length === 1) return opsList[0].pedido || 0;
+  const sumPed = opsList.reduce((a, o) => a + (o.pedido || 0), 0);
+  const maxPed = Math.max(...opsList.map((o) => o.pedido || 0), 0);
+  if (
+    maxPed > 0 &&
+    opsList.some((o) => o.pedido === maxPed && o.pedido > o.acum) &&
+    (opsList.some((o) => o.pedido !== maxPed && o.pedido <= maxPed - o.acum) ||
+      opsList.every((o) => o.pedido === maxPed) ||
+      acumTotal <= maxPed)
+  ) {
+    return maxPed;
+  }
+  if (maxPed > 0 && acumTotal <= maxPed && opsList.some((o) => o.pedido > o.acum)) {
+    return maxPed;
+  }
+  return sumPed;
+}
+
+export interface OpMiembroResumen {
+  op: string;
+  fdesp: string;
+  cliente: string;
+  pedido: number;
+  ent: number;
+  entF: number;
+  stock: number;
+  acum: number;
+  enProduccion: boolean;
+  cantPlanta: number;
+}
+
+export interface GrupoOpConsolidado {
+  key: string;
+  op: string;
+  fdesp: string;
+  sap: string;
+  cliente: string;
+  desc: string;
+  pedido: number;
+  stock: number;
+  ent: number;
+  entF: number;
+  acum: number;
+  falt: number;
+  exc: number;
+  enProduccion: boolean;
+  cantPlanta: number;
+  estado: string;
+  lineas: Record<string, { sap: string; desc: string; ent: number }>;
+  opsMiembros: OpMiembroResumen[];
+  esGrupoSap: boolean;
+}
+
+export function consolidarOpsPorSap(
+  ops: GrupoOp[],
+  planes?: Record<string, PlanDespacho>
+): GrupoOpConsolidado[] {
+  const grupos: Record<string, { sap: string; fdesp: string; members: GrupoOp[] }> = {};
+  const orden: string[] = [];
+
+  ops.forEach((o) => {
+    const sapSet = new Set<string>();
+    Object.values(o.lineas || {}).forEach((l) => {
+      extraerSaps(l.sap).forEach((s) => sapSet.add(s));
+    });
+    const sapsUnicos = Array.from(sapSet);
+    const singleSap = sapsUnicos.length === 1 ? sapsUnicos[0] : '';
+    const key = singleSap
+      ? `${o.fdesp}|SAP|${singleSap}`
+      : `${o.fdesp}|OP|${o.op.trim().toLowerCase()}`;
+
+    if (!grupos[key]) {
+      grupos[key] = {
+        sap: singleSap || sapsUnicos.join(' + '),
+        fdesp: o.fdesp,
+        members: [],
+      };
+      orden.push(key);
+    }
+    grupos[key].members.push(o);
+  });
+
+  return orden.map((key) => {
+    const { sap, fdesp, members } = grupos[key];
+    const opsMiembros: OpMiembroResumen[] = members.map((o) => ({
+      op: o.op,
+      fdesp: o.fdesp,
+      cliente: o.cliente,
+      pedido: o.pedido,
+      ent: o.ent,
+      entF: o.entF ?? o.ent,
+      stock: o.stock,
+      acum: o.acum,
+      enProduccion: Boolean(o.enProduccion),
+      cantPlanta: o.cantPlanta || 0,
+    }));
+
+    const clientesSet = new Set<string>();
+    const descSet = new Set<string>();
+    const lineas: Record<string, { sap: string; desc: string; ent: number }> = {};
+
+    members.forEach((o) => {
+      if (o.cliente) clientesSet.add(o.cliente);
+      if (o.desc) descSet.add(o.desc);
+      Object.keys(o.lineas || {}).forEach((lk) => {
+        const L = o.lineas[lk];
+        if (!lineas[lk]) {
+          lineas[lk] = { sap: L.sap, desc: L.desc, ent: 0 };
+        }
+        if (!lineas[lk].desc && L.desc) lineas[lk].desc = L.desc;
+        lineas[lk].ent += L.ent || 0;
+      });
+    });
+
+    const ent = opsMiembros.reduce((a, m) => a + m.ent, 0);
+    const entF = opsMiembros.reduce((a, m) => a + m.entF, 0);
+    const stockReg = opsMiembros.reduce((a, m) => a + m.stock, 0);
+
+    let planSapStock = 0;
+    if (sap && stockReg === 0 && planes?.[fdesp]?.items) {
+      const targetSaps = extraerSaps(sap);
+      const vistosPlan = new Set<string>();
+      planes[fdesp].items.forEach((it) => {
+        const s = String(it.sap || '').trim().toUpperCase();
+        if (targetSaps.includes(s) && !vistosPlan.has(s)) {
+          vistosPlan.add(s);
+          planSapStock += it.stock || 0;
+        }
+      });
+    }
+
+    const stock = stockReg > 0 ? stockReg : planSapStock;
+    const acum = opsMiembros.reduce((a, m) => a + m.acum, 0) + (stockReg === 0 ? planSapStock : 0);
+
+    let pedido = 0;
+    const planSapCant = sap && planes ? pedidoPlanSap(sap, fdesp, planes) : 0;
+    if (planSapCant > 0) {
+      pedido = planSapCant;
+    } else {
+      pedido = calcularPedidoCompartido(members, acum);
+    }
+
+    const enProduccion = opsMiembros.some((m) => m.enProduccion);
+    const cantPlanta = opsMiembros.reduce((a, m) => a + m.cantPlanta, 0);
+    const falt = pedido > 0 ? Math.max(pedido - acum, 0) : 0;
+    const exc = pedido > 0 ? Math.max(acum - pedido, 0) : 0;
+    const estado = enProduccion
+      ? 'EN PRODUCCION'
+      : pedido > 0
+      ? acum >= pedido
+        ? 'COMPLETO'
+        : 'INCOMPLETO'
+      : '';
+
+    return {
+      key,
+      op: opsMiembros.map((m) => m.op).join(' / '),
+      fdesp,
+      sap,
+      cliente: Array.from(clientesSet).join(', '),
+      desc: Array.from(descSet).join(' + '),
+      pedido,
+      stock,
+      ent,
+      entF,
+      acum,
+      falt,
+      exc,
+      enProduccion,
+      cantPlanta,
+      estado,
+      lineas,
+      opsMiembros,
+      esGrupoSap: opsMiembros.length > 1,
+    };
+  });
 }
 
 export interface ResumenSapDespachoItem {

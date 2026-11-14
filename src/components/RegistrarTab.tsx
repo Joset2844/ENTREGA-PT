@@ -16,6 +16,7 @@ import {
   avisoFecha,
   compararSapConDespacho,
   confirmarAvisos,
+  consolidarOpsPorSap,
   esEntero,
   esStock,
   extraerSaps,
@@ -1216,6 +1217,8 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     if (sapInfo?.enDespacho && sapInfo.pedidoSap > 0) {
       const finSap = sapInfo.acumuladoSap + sapPrevGrid + o.total;
       o.sapEnDespacho = true;
+      o.sapPedido = sapInfo.pedidoSap;
+      o.sapAcumulado = finSap;
       o.sapCompleta = finSap >= sapInfo.pedidoSap;
       o.sapFalta = Math.max(sapInfo.pedidoSap - finSap, 0);
       if (finSap > sapInfo.pedidoSap && (sapInfo.otrasOps.length > 0 || sapPrevGrid > 0)) {
@@ -1581,6 +1584,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     0
   );
   const groupedSub = agrupar(sub, registros, planesOp, opExtra);
+  const opsConsolidadasSub = consolidarOpsPorSap(groupedSub.ops, planes);
   const sapSummary = resumenSapsDespacho(fdesp, registros, planes, opExtra, catalogo);
 
   // Suggestions list for OP input
@@ -1774,8 +1778,8 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                   const sapTag =
                     o.sapEnDespacho && !o.vacia
                       ? o.sapCompleta
-                        ? 'Completa SAP'
-                        : `Faltan ${o.sapFalta} u SAP`
+                        ? `Completa SAP (${o.sapAcumulado}/${o.sapPedido})`
+                        : `Faltan ${o.sapFalta} u SAP (${o.sapAcumulado}/${o.sapPedido})`
                       : '';
                   const msg = o.vacia
                     ? ''
@@ -1786,7 +1790,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                     : o.cierra
                     ? `Listo · completa la OP${sapTag ? ` (${sapTag})` : ''}`
                     : 'Listo' +
-                      (o.falta ? ` · faltan ${o.falta}` : '') +
+                      (o.falta && !o.sapCompleta ? ` · faltan ${o.falta}` : '') +
                       (sapTag ? ` · ${sapTag}` : '');
 
                   const rowClass = o.vacia
@@ -2201,12 +2205,37 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                   const stk = stockDe(formOp.trim(), fdesp, registros);
                   const nu = formTotalCalc;
                   const pe = p - ac - nu;
+                  const sapCompartido = Boolean(formSapInfo && formSapInfo.otrasOps.length > 0);
+                  const pedSap = formSapInfo?.pedidoSap || p;
+                  const acSapFin = (formSapInfo?.acumuladoSap || ac) + nu;
+                  const peSap = pedSap - acSapFin;
+                  const opsGrupo = sapCompartido
+                    ? Array.from(new Set([...formSapInfo!.otrasOps.map((x) => x.op), formOp.trim()])).join(' / ')
+                    : '';
                   return (
                     <>
-                      Despacho {fcorta(fdesp)} · Ya entregado: {ac - stk} u
-                      {stk ? ` + stock inicial ${stk} u` : ''}
-                      {nu ? ` + esta entrada ${nu} u` : ''} ·{' '}
-                      {pe >= 0 ? `Pendiente: ${pe} u` : `Excede en ${-pe} u`}
+                      <div>
+                        Despacho {fcorta(fdesp)} · Esta OP ({formOp.trim()}): {ac - stk} u entreg.
+                        {stk ? ` + stk ${stk} u` : ''}
+                        {nu ? ` + nueva ${nu} u` : ''} ·{' '}
+                        {pe >= 0 ? `Faltan ${pe} u` : `Excede en ${-pe} u`}
+                      </div>
+                      {sapCompartido && (
+                        <div
+                          style={{
+                            marginTop: '3px',
+                            fontWeight: 700,
+                            color: peSap <= 0 ? 'var(--green)' : 'var(--blue)',
+                          }}
+                        >
+                          Total SAP {formSapInfo!.sap} ({opsGrupo}): {acSapFin}/{pedSap} u ·{' '}
+                          {peSap <= 0
+                            ? peSap === 0
+                              ? '✓ Completo'
+                              : `✓ Completo (+${-peSap} u)`
+                            : `Faltan ${peSap} u`}
+                        </div>
+                      )}
                     </>
                   );
                 })()}
@@ -2335,7 +2364,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       )}
 
       {/* Grouped summary list table of current despacho */}
-      {groupedSub.ops.length > 0 && (
+      {opsConsolidadasSub.length > 0 && (
         <div id="despachoRes" className="panel" style={{ padding: '16px', marginTop: '12px' }}>
           <div
             className="sec"
@@ -2348,7 +2377,13 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
               marginBottom: '12px',
             }}
           >
-            <span>Resumen del Despacho {fcorta(fdesp)} por OP ({groupedSub.ops.length} OPs)</span>
+            <span>
+              Resumen del Despacho {fcorta(fdesp)} por OP ({opsConsolidadasSub.length}
+              {opsConsolidadasSub.length !== groupedSub.ops.length
+                ? ` fila(s) · ${groupedSub.ops.length} OPs`
+                : ' OPs'}
+              )
+            </span>
             <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--amber-ink)' }}>
               Entregado: {totEntregado} u{totStock ? ` · Stock inicial: ${totStock} u` : ''}
             </span>
@@ -2374,28 +2409,19 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {groupedSub.ops.map((o) => {
-                  const pd = o.pedido - o.acum;
-                  const ok = o.pedido > 0 && pd <= 0;
+                {opsConsolidadasSub.map((o) => {
+                  const ok = o.pedido > 0 && o.acum >= o.pedido;
                   const enProd = Boolean(o.enProduccion);
                   const cantPlanta = o.cantPlanta || 0;
-                  const sapsDeOp = Object.keys(o.lineas)
-                    .map((k) => o.lineas[k].sap)
-                    .filter(Boolean)
-                    .join(' + ');
-                  const sapCheck = sapsDeOp
-                    ? compararSapConDespacho(sapsDeOp, o.fdesp, registros, planes, o.op)
-                    : null;
-                  const sapCompartido = Boolean(sapCheck && sapCheck.otrasOps.length > 0);
-                  const sapCubiertoPorOtras = Boolean(
-                    sapCompartido &&
-                      sapCheck!.pedidoSap > 0 &&
-                      sapCheck!.acumuladoSap >= sapCheck!.pedidoSap
-                  );
                   return (
-                    <tr key={o.op}>
+                    <tr key={o.key}>
                       <td className="td-op op-cell">
                         <span className="op mono">{o.op}</span>
+                        {o.esGrupoSap && (
+                          <div style={{ fontSize: '0.68rem', color: 'var(--blue)', fontWeight: 700, marginTop: '2px' }}>
+                            {o.opsMiembros.length} OPs · mismo SAP
+                          </div>
+                        )}
                       </td>
                       <td>{o.cliente}</td>
                       <td style={{ fontSize: '0.82rem' }}>
@@ -2416,6 +2442,13 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                         ) : (
                           <span style={{ color: 'var(--muted)' }}>—</span>
                         )}
+                        {o.esGrupoSap && (
+                          <div style={{ fontSize: '0.73rem', color: 'var(--blue)', marginTop: '3px', fontWeight: 600 }}>
+                            {o.opsMiembros
+                              .map((m) => `${m.op}: ${m.ent} u${m.stock > 0 ? ` + ${m.stock} stk` : ''}`)
+                              .join(' · ')}
+                          </div>
+                        )}
                       </td>
                       <td className="n mono">{o.pedido || 0}</td>
                       <td className="n mono">{o.stock > 0 ? `${o.stock} u` : '—'}</td>
@@ -2424,98 +2457,175 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                       </td>
                       <td className="n mono">
                         <strong>{o.acum} u</strong>
-                        {sapCompartido && (
-                          <div style={{ fontSize: '0.7rem', color: 'var(--blue)', fontWeight: 600 }}>
-                            SAP: {sapCheck!.acumuladoSap}/{sapCheck!.pedidoSap || o.pedido} u
+                        {o.pedido > 0 && (
+                          <div
+                            style={{
+                              fontSize: '0.72rem',
+                              color: ok ? 'var(--green)' : 'var(--blue)',
+                              fontWeight: 700,
+                            }}
+                          >
+                            {o.acum}/{o.pedido}
                           </div>
                         )}
                       </td>
+                      <td className="n mono">{o.falt > 0 ? `${o.falt} u` : '0'}</td>
                       <td className="n mono">
-                        {sapCubiertoPorOtras && pd > 0 ? (
-                          <span style={{ color: 'var(--green)', fontWeight: 700 }} title="Cubierto entre OPs del mismo SAP">
-                            0 (SAP)
-                          </span>
-                        ) : Math.max(pd, 0) > 0 ? (
-                          `${Math.max(pd, 0)} u`
-                        ) : (
-                          '0'
-                        )}
-                      </td>
-                      <td className="n mono">
-                        {pd < 0 && o.pedido > 0 ? (
+                        {o.exc > 0 ? (
                           <span style={{ color: 'var(--red)', fontWeight: 700 }}>
-                            {-pd} u
+                            {o.exc} u
                           </span>
                         ) : (
                           '0'
                         )}
                       </td>
                       <td className="n">
-                        <button
-                          type="button"
-                          className="btn-s"
-                          style={{
-                            padding: '3px 8px',
-                            fontSize: '0.82rem',
-                            fontWeight: 700,
-                            minHeight: '28px',
-                            background: cantPlanta > 0 ? 'var(--blue)' : 'var(--field)',
-                            color: cantPlanta > 0 ? '#fff' : 'var(--muted2)',
-                            borderColor: cantPlanta > 0 ? 'var(--blue)' : 'var(--inp)',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                          }}
-                          onClick={() =>
-                            setPlantaEditModal({
-                              op: o.op,
-                              fdesp: o.fdesp,
-                              currentPlanta: cantPlanta,
-                              currentEnProduccion: enProd,
-                              pedido: o.pedido,
-                              entregado: o.ent,
-                              stock: o.stock,
-                            })
-                          }
-                          title="Clic para editar la cantidad restante en planta"
-                        >
-                          {cantPlanta > 0 ? `🏭 ${cantPlanta} u` : '0 u'}
-                        </button>
+                        {!o.esGrupoSap ? (
+                          <button
+                            type="button"
+                            className="btn-s"
+                            style={{
+                              padding: '3px 8px',
+                              fontSize: '0.82rem',
+                              fontWeight: 700,
+                              minHeight: '28px',
+                              background: cantPlanta > 0 ? 'var(--blue)' : 'var(--field)',
+                              color: cantPlanta > 0 ? '#fff' : 'var(--muted2)',
+                              borderColor: cantPlanta > 0 ? 'var(--blue)' : 'var(--inp)',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => {
+                              const m = o.opsMiembros[0];
+                              setPlantaEditModal({
+                                op: m.op,
+                                fdesp: m.fdesp,
+                                currentPlanta: m.cantPlanta,
+                                currentEnProduccion: m.enProduccion,
+                                pedido: m.pedido || o.pedido,
+                                entregado: m.ent,
+                                stock: m.stock,
+                              });
+                            }}
+                            title="Clic para editar la cantidad restante en planta"
+                          >
+                            {cantPlanta > 0 ? `🏭 ${cantPlanta} u` : '0 u'}
+                          </button>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-end' }}>
+                            {o.opsMiembros.map((m) => (
+                              <button
+                                key={m.op}
+                                type="button"
+                                className="btn-s"
+                                style={{
+                                  padding: '2px 6px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  minHeight: '24px',
+                                  background: m.cantPlanta > 0 ? 'var(--blue)' : 'var(--field)',
+                                  color: m.cantPlanta > 0 ? '#fff' : 'var(--muted2)',
+                                  borderColor: m.cantPlanta > 0 ? 'var(--blue)' : 'var(--inp)',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                }}
+                                onClick={() =>
+                                  setPlantaEditModal({
+                                    op: m.op,
+                                    fdesp: m.fdesp,
+                                    currentPlanta: m.cantPlanta,
+                                    currentEnProduccion: m.enProduccion,
+                                    pedido: m.pedido || o.pedido,
+                                    entregado: m.ent,
+                                    stock: m.stock,
+                                  })
+                                }
+                                title={`Editar planta de OP ${m.op}`}
+                              >
+                                {m.op}: {m.cantPlanta > 0 ? `🏭 ${m.cantPlanta} u` : '0 u'}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </td>
                       <td className="k" style={{ textAlign: 'center' }}>
-                        <label
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '5px',
-                            cursor: 'pointer',
-                            margin: 0,
-                            fontSize: '0.82rem',
-                            fontWeight: 600,
-                            userSelect: 'none',
-                          }}
-                          title="Marcar si esta OP está en producción"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={enProd}
-                            onChange={(e) => handleToggleEnProduccion(o.op, o.fdesp, e.target.checked)}
+                        {!o.esGrupoSap ? (
+                          <label
                             style={{
-                              width: '18px',
-                              height: '18px',
-                              minHeight: '18px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
                               cursor: 'pointer',
-                              accentColor: 'var(--blue)',
+                              margin: 0,
+                              fontSize: '0.82rem',
+                              fontWeight: 600,
+                              userSelect: 'none',
                             }}
-                          />
-                          <span
-                            style={{
-                              color: enProd ? 'var(--blue)' : 'var(--muted)',
-                              fontWeight: enProd ? 700 : 500,
-                            }}
+                            title="Marcar si esta OP está en producción"
                           >
-                            {enProd ? 'En prod.' : 'No'}
-                          </span>
-                        </label>
+                            <input
+                              type="checkbox"
+                              checked={enProd}
+                              onChange={(e) => handleToggleEnProduccion(o.opsMiembros[0].op, o.fdesp, e.target.checked)}
+                              style={{
+                                width: '18px',
+                                height: '18px',
+                                minHeight: '18px',
+                                cursor: 'pointer',
+                                accentColor: 'var(--blue)',
+                              }}
+                            />
+                            <span
+                              style={{
+                                color: enProd ? 'var(--blue)' : 'var(--muted)',
+                                fontWeight: enProd ? 700 : 500,
+                              }}
+                            >
+                              {enProd ? 'En prod.' : 'No'}
+                            </span>
+                          </label>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'center' }}>
+                            {o.opsMiembros.map((m) => (
+                              <label
+                                key={m.op}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  cursor: 'pointer',
+                                  margin: 0,
+                                  fontSize: '0.73rem',
+                                  fontWeight: 600,
+                                  userSelect: 'none',
+                                }}
+                                title={`Marcar si OP ${m.op} está en producción`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={m.enProduccion}
+                                  onChange={(e) => handleToggleEnProduccion(m.op, m.fdesp, e.target.checked)}
+                                  style={{
+                                    width: '15px',
+                                    height: '15px',
+                                    minHeight: '15px',
+                                    cursor: 'pointer',
+                                    accentColor: 'var(--blue)',
+                                  }}
+                                />
+                                <span
+                                  className="mono"
+                                  style={{
+                                    color: m.enProduccion ? 'var(--blue)' : 'var(--muted)',
+                                    fontWeight: m.enProduccion ? 700 : 500,
+                                  }}
+                                >
+                                  {m.op}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
                       </td>
                       <td className="k">
                         {enProd ? (
@@ -2531,25 +2641,23 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                                 }}
                               >
                                 {ok
-                                  ? pd < 0
-                                    ? `Cubierto (+${-pd})`
+                                  ? o.exc > 0
+                                    ? `Cubierto (+${o.exc})`
                                     : 'Cubierto'
-                                  : `Faltan ${pd} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
+                                  : `Faltan ${o.falt} u${cantPlanta > 0 ? ` (${cantPlanta} en planta)` : ''}`}
                               </div>
                             )}
                           </div>
                         ) : o.pedido > 0 ? (
                           <div>
-                            <span className={`badge ${ok || sapCubiertoPorOtras ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
+                            <span className={`badge ${ok ? 'b-COMPLETO' : 'b-INCOMPLETO'}`}>
                               {ok
-                                ? pd < 0
-                                  ? `COMPLETO (+${-pd})`
+                                ? o.exc > 0
+                                  ? `COMPLETO (+${o.exc})`
                                   : 'COMPLETO'
-                                : sapCubiertoPorOtras
-                                ? 'COMPLETO (SAP)'
-                                : `Faltan ${pd}`}
+                                : `Faltan ${o.falt}`}
                             </span>
-                            {cantPlanta > 0 && !ok && !sapCubiertoPorOtras && (
+                            {cantPlanta > 0 && !ok && (
                               <div
                                 style={{
                                   fontSize: '0.72rem',
@@ -2575,77 +2683,135 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                             </span>
                           )
                         )}
-                        {sapCubiertoPorOtras && !ok && (
-                          <div
-                            style={{
-                              fontSize: '0.7rem',
-                              marginTop: '3px',
-                              color: 'var(--green)',
-                              fontWeight: 700,
-                            }}
-                            title={`Completado junto con ${sapCheck!.otrasOps.map((x) => x.op).join(', ')}`}
-                          >
-                            ✓ SAP cubierto ({sapCheck!.acumuladoSap}/{sapCheck!.pedidoSap} u)
-                          </div>
-                        )}
                       </td>
                       <td className="actions" style={{ whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'inline-flex', gap: '4px', justifyContent: 'flex-end' }}>
-                          <button
-                            className="stock-btn"
-                            type="button"
-                            onClick={() =>
-                              setEntregasModalOp({
-                                op: o.op,
-                                fdesp: o.fdesp,
-                                cliente: o.cliente,
-                                pedido: o.pedido,
-                                stock: o.stock,
-                              })
-                            }
-                            title="Ver y borrar entregas individuales de esta OP"
-                            style={{
-                              borderColor: 'var(--amber)',
-                            }}
-                          >
-                            👁️ Entregas
-                          </button>
-                          <button
-                            className="stock-btn"
-                            type="button"
-                            onClick={() =>
-                              setPlantaEditModal({
-                                op: o.op,
-                                fdesp: o.fdesp,
-                                currentPlanta: cantPlanta,
-                                currentEnProduccion: enProd,
-                                pedido: o.pedido,
-                                entregado: o.ent,
-                                stock: o.stock,
-                              })
-                            }
-                            title="Editar cantidad en planta y estado de producción"
-                            style={{
-                              borderColor: cantPlanta > 0 || enProd ? 'var(--blue)' : undefined,
-                            }}
-                          >
-                            🏭 Planta
-                          </button>
-                          <button
-                            className="stock-btn"
-                            type="button"
-                            onClick={() =>
-                              setStockEditModal({
-                                op: o.op,
-                                fdesp: o.fdesp,
-                                currentStock: o.stock || 0,
-                                pedido: o.pedido,
-                              })
-                            }
-                          >
-                            ✏️ Stock ({o.stock || 0})
-                          </button>
-                        </div>
+                        {!o.esGrupoSap ? (
+                          (() => {
+                            const m = o.opsMiembros[0];
+                            return (
+                              <div style={{ display: 'inline-flex', gap: '4px', justifyContent: 'flex-end' }}>
+                                <button
+                                  className="stock-btn"
+                                  type="button"
+                                  onClick={() =>
+                                    setEntregasModalOp({
+                                      op: m.op,
+                                      fdesp: m.fdesp,
+                                      cliente: m.cliente,
+                                      pedido: m.pedido || o.pedido,
+                                      stock: m.stock,
+                                    })
+                                  }
+                                  title="Ver y borrar entregas individuales de esta OP"
+                                  style={{ borderColor: 'var(--amber)' }}
+                                >
+                                  👁️ Entregas
+                                </button>
+                                <button
+                                  className="stock-btn"
+                                  type="button"
+                                  onClick={() =>
+                                    setPlantaEditModal({
+                                      op: m.op,
+                                      fdesp: m.fdesp,
+                                      currentPlanta: m.cantPlanta,
+                                      currentEnProduccion: m.enProduccion,
+                                      pedido: m.pedido || o.pedido,
+                                      entregado: m.ent,
+                                      stock: m.stock,
+                                    })
+                                  }
+                                  title="Editar cantidad en planta y estado de producción"
+                                  style={{
+                                    borderColor: m.cantPlanta > 0 || m.enProduccion ? 'var(--blue)' : undefined,
+                                  }}
+                                >
+                                  🏭 Planta
+                                </button>
+                                <button
+                                  className="stock-btn"
+                                  type="button"
+                                  onClick={() =>
+                                    setStockEditModal({
+                                      op: m.op,
+                                      fdesp: m.fdesp,
+                                      currentStock: m.stock || 0,
+                                      pedido: m.pedido || o.pedido,
+                                    })
+                                  }
+                                >
+                                  ✏️ Stock ({m.stock || 0})
+                                </button>
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-end' }}>
+                            {o.opsMiembros.map((m) => (
+                              <div key={m.op} style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+                                <span className="mono" style={{ fontSize: '0.7rem', color: 'var(--muted)', marginRight: '2px' }}>
+                                  {m.op}
+                                </span>
+                                <button
+                                  className="stock-btn"
+                                  type="button"
+                                  onClick={() =>
+                                    setEntregasModalOp({
+                                      op: m.op,
+                                      fdesp: m.fdesp,
+                                      cliente: m.cliente,
+                                      pedido: m.pedido || o.pedido,
+                                      stock: m.stock,
+                                    })
+                                  }
+                                  title={`Ver entregas de OP ${m.op}`}
+                                  style={{ borderColor: 'var(--amber)', padding: '2px 5px', fontSize: '0.72rem' }}
+                                >
+                                  👁️
+                                </button>
+                                <button
+                                  className="stock-btn"
+                                  type="button"
+                                  onClick={() =>
+                                    setPlantaEditModal({
+                                      op: m.op,
+                                      fdesp: m.fdesp,
+                                      currentPlanta: m.cantPlanta,
+                                      currentEnProduccion: m.enProduccion,
+                                      pedido: m.pedido || o.pedido,
+                                      entregado: m.ent,
+                                      stock: m.stock,
+                                    })
+                                  }
+                                  title={`Planta OP ${m.op}`}
+                                  style={{
+                                    borderColor: m.cantPlanta > 0 || m.enProduccion ? 'var(--blue)' : undefined,
+                                    padding: '2px 5px',
+                                    fontSize: '0.72rem',
+                                  }}
+                                >
+                                  🏭
+                                </button>
+                                <button
+                                  className="stock-btn"
+                                  type="button"
+                                  onClick={() =>
+                                    setStockEditModal({
+                                      op: m.op,
+                                      fdesp: m.fdesp,
+                                      currentStock: m.stock || 0,
+                                      pedido: m.pedido || o.pedido,
+                                    })
+                                  }
+                                  title={`Stock OP ${m.op}`}
+                                  style={{ padding: '2px 5px', fontSize: '0.72rem' }}
+                                >
+                                  ✏️({m.stock || 0})
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -2717,6 +2883,11 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                     <td style={{ fontSize: '0.82rem' }}>
                       {s.ops.length > 0 ? (
                         <div>
+                          {s.ops.length > 1 && (
+                            <div className="mono" style={{ fontWeight: 700, color: 'var(--blue)', marginBottom: '3px' }}>
+                              {s.ops.map((opItem) => opItem.op).join(' / ')}
+                            </div>
+                          )}
                           {s.ops.map((opItem) => (
                             <div key={opItem.op} style={{ marginBottom: '2px' }}>
                               <span className="mono" style={{ fontWeight: 700 }}>
@@ -2730,7 +2901,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                       ) : (
                         <span style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
                           Sin entregas aún
-                          {s.catalogoOps.length > 0 && ` (Catálogo: ${s.catalogoOps.join(', ')})`}
+                          {s.catalogoOps.length > 0 && ` (Catálogo: ${s.catalogoOps.join(' / ')})`}
                         </span>
                       )}
                     </td>
@@ -2747,6 +2918,17 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
                     </td>
                     <td className="n mono">
                       <strong>{s.acumulado} u</strong>
+                      {s.pedidoSap > 0 && (
+                        <div
+                          style={{
+                            fontSize: '0.72rem',
+                            color: s.acumulado >= s.pedidoSap ? 'var(--green)' : 'var(--blue)',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {s.acumulado}/{s.pedidoSap}
+                        </div>
+                      )}
                     </td>
                     <td className="n mono">{s.pendiente > 0 ? `${s.pendiente} u` : '0'}</td>
                     <td className="n mono">
