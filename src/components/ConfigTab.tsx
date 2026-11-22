@@ -6,6 +6,7 @@ import { K_CAT, K_CATTS, K_RES, ld, sv } from '../services/storage';
 import { archivoOk } from '../services/excel';
 import { hoy, norm, sanitizarStockDuplicados } from '../utils/helpers';
 import { encolarDel, validoRec } from '../services/sheets';
+import { QrEtiquetasModal } from './QrEtiquetasModal';
 
 interface ConfigTabProps {
   nombres: string[];
@@ -39,6 +40,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
   const [ultimoRespaldo, setUltimoRespaldo] = useState<string | null>(() =>
     ld<string | null>(K_RES, null)
   );
+  const [showQrEtiquetas, setShowQrEtiquetas] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resFileInputRef = useRef<HTMLInputElement>(null);
@@ -579,6 +581,15 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
           >
             Importar Excel (solo este equipo)
           </button>
+          <button
+            className="btn-s"
+            id="qrCat"
+            type="button"
+            onClick={() => setShowQrEtiquetas(true)}
+            style={{ borderColor: 'var(--amber)', fontWeight: 700 }}
+          >
+            🏷️ Etiquetas QR (zDesign)
+          </button>
           <input
             type="file"
             ref={fileInputRef}
@@ -661,6 +672,14 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
           </button>
         </div>
       </div>
+
+      {showQrEtiquetas && (
+        <QrEtiquetasModal
+          catalogo={catalogo}
+          onClose={() => setShowQrEtiquetas(false)}
+          onToast={onToast}
+        />
+      )}
     </div>
   );
 };

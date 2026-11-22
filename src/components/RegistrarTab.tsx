@@ -46,6 +46,9 @@ import { ConfirmarListaModal } from './ConfirmarListaModal';
 import { EditarStockModal } from './EditarStockModal';
 import { EditarPlantaModal } from './EditarPlantaModal';
 import { EntregasOpModal } from './EntregasOpModal';
+import { QrScannerModal } from './QrScannerModal';
+import { QrEtiquetasModal } from './QrEtiquetasModal';
+import { QrParsedResult } from '../utils/qr';
 import { K_GRID, ld, sv } from '../services/storage';
 
 interface RegistrarTabProps {
@@ -148,6 +151,96 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     pedido: number;
     stock: number;
   } | null>(null);
+
+  const [showQrScanner, setShowQrScanner] = useState(false);
+  const [showQrEtiquetas, setShowQrEtiquetas] = useState(false);
+
+  const handleQrScanned = (res: QrParsedResult) => {
+    const targetOp = res.op || '';
+    const autoPed = targetOp
+      ? pedidoDe(targetOp, fdesp, registros, catalogo, planesOp, planes, res.sap)
+      : 0;
+
+    if (modoReg === 'tabla') {
+      let modVal = 'all';
+      if (res.catMatch && res.catMatch.modelos.length > 1) {
+        if (res.modeloIdx >= 0) {
+          modVal = String(res.modeloIdx);
+        } else {
+          const matchingIdxs = res.catMatch.modelos
+            .map((mo, idx) => ({
+              idx,
+              match: mo.sap
+                ? compararSapConDespacho(mo.sap, fdesp, registros, planes, res.catMatch!.op)?.enDespacho
+                : false,
+            }))
+            .filter((x) => x.match)
+            .map((x) => x.idx);
+          if (matchingIdxs.length === 1) modVal = String(matchingIdxs[0]);
+        }
+      }
+
+      const pedidoRow =
+        res.ped > 0 && (!(autoPed > 0) || (!res.catMatch && res.ped !== autoPed))
+          ? String(res.ped)
+          : '';
+
+      const scannedRow: GridRow = {
+        op: targetOp,
+        mod: modVal,
+        sap: res.catMatch ? '' : res.sap || '',
+        pedido: pedidoRow,
+        emp: res.emp || 'caja',
+        u: res.u > 0 ? String(res.u) : '',
+        c: res.c > 0 ? String(res.c) : '',
+      };
+
+      const updated = [...grid];
+      const emptyIdx = updated.findIndex(
+        (row) => !row.op.trim() && !row.u && !row.c && !(row.sap || '').trim()
+      );
+      if (emptyIdx >= 0) {
+        updated[emptyIdx] = scannedRow;
+      } else {
+        updated.push(scannedRow);
+      }
+      const last = updated[updated.length - 1];
+      if (!last || last.op || last.u || last.c || (last.sap || '').trim()) {
+        updated.push({ op: '', mod: 'all', pedido: '', emp: 'caja', u: '', c: '' });
+      }
+      setGrid(updated);
+      saveGridDraft(updated);
+    } else {
+      if (res.catMatch) {
+        aplicarOpForm(res.catMatch);
+        if (res.modeloIdx >= 0 && res.catMatch.modelos.length > 1) {
+          handleSelectModeloForm(res.modeloIdx, res.catMatch);
+        }
+      } else {
+        setOpAplicada('');
+        setFormModeloSel(-1);
+        setFormOp(targetOp);
+        setFormSap(res.sap || '');
+        setFormDesc(res.desc || (res.sap ? buscarSap(res.sap, catalogo, registros) : ''));
+        setFormCliente(res.cli || '');
+      }
+      if (res.ped > 0 && !(autoPed > 0)) {
+        setPedidoManualForm(true);
+        setFormPedido(String(res.ped));
+      }
+      if (res.emp) setFormEmp(res.emp);
+      if (res.u > 0) setFormU(String(res.u));
+      if (res.c > 0) setFormC(String(res.c));
+    }
+
+    setShowQrScanner(false);
+    onToast(
+      'ok',
+      `✓ QR leído: ${targetOp ? `OP ${targetOp}` : ''}${res.sap ? ` · SAP ${res.sap}` : ''}${
+        res.catMatch ? '' : ' (completa datos si falta catálogo)'
+      }`
+    );
+  };
 
   const handleBorrarRegistro = (r: Registro) => {
     if (
@@ -1686,22 +1779,59 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
         </div>
       </div>
 
-      {/* Mode switcher */}
-      <div className="chips modo" id="modoReg">
-        <button
-          className={`chip ${modoReg === 'tabla' ? 'active' : ''}`}
-          type="button"
-          onClick={() => onModoRegChange('tabla')}
-        >
-          Tabla rápida (tipo Excel)
-        </button>
-        <button
-          className={`chip ${modoReg === 'form' ? 'active' : ''}`}
-          type="button"
-          onClick={() => onModoRegChange('form')}
-        >
-          Formulario
-        </button>
+      {/* Mode switcher + QR Actions */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px 12px',
+          marginBottom: '12px',
+        }}
+      >
+        <div className="chips modo" id="modoReg" style={{ margin: 0, flex: '1 1 300px' }}>
+          <button
+            className={`chip ${modoReg === 'tabla' ? 'active' : ''}`}
+            type="button"
+            onClick={() => onModoRegChange('tabla')}
+          >
+            Tabla rápida (tipo Excel)
+          </button>
+          <button
+            className={`chip ${modoReg === 'form' ? 'active' : ''}`}
+            type="button"
+            onClick={() => onModoRegChange('form')}
+          >
+            Formulario
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            className="btn-s"
+            id="btnScanQr"
+            type="button"
+            onClick={() => setShowQrScanner(true)}
+            style={{
+              background: 'var(--amber)',
+              color: 'var(--on-amber)',
+              borderColor: 'var(--amber)',
+              fontWeight: 700,
+            }}
+          >
+            📷 Escanear QR
+          </button>
+          <button
+            className="btn-s"
+            id="btnQrEtiquetas"
+            type="button"
+            onClick={() => setShowQrEtiquetas(true)}
+            title="Generar e imprimir etiquetas QR con datos del catálogo para Zebra / zDesign"
+          >
+            🏷️ Etiquetas QR
+          </button>
+        </div>
       </div>
 
       {/* TABLA RÁPIDA (GRID) */}
@@ -1730,6 +1860,14 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
               onClick={handleTraerOpsPendientes}
             >
               Traer OPs pendientes del día
+            </button>
+            <button
+              className="btn-s"
+              type="button"
+              onClick={() => setShowQrScanner(true)}
+              style={{ borderColor: 'var(--amber)', fontWeight: 700 }}
+            >
+              📷 Escanear QR a fila
             </button>
             <button
               className="btn-s"
@@ -1962,7 +2100,17 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
         <div id="regForm" className="panel">
           <div className="fcol">
             <div className="field">
-              <label>OP</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                <label style={{ margin: 0 }}>OP</label>
+                <button
+                  type="button"
+                  className="btn-s"
+                  onClick={() => setShowQrScanner(true)}
+                  style={{ minHeight: '28px', padding: '2px 10px', fontSize: '0.76rem', borderColor: 'var(--amber)', fontWeight: 700 }}
+                >
+                  📷 Escanear QR
+                </button>
+              </div>
               <input
                 type="text"
                 className="mono"
@@ -3114,6 +3262,22 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
           onDeleteRegistro={handleBorrarRegistro}
           onDeleteAllForOp={() => handleBorrarTodasOp(entregasModalOp.op, entregasModalOp.fdesp)}
           onClose={() => setEntregasModalOp(null)}
+        />
+      )}
+
+      {showQrScanner && (
+        <QrScannerModal
+          catalogo={catalogo}
+          onScan={handleQrScanned}
+          onClose={() => setShowQrScanner(false)}
+        />
+      )}
+
+      {showQrEtiquetas && (
+        <QrEtiquetasModal
+          catalogo={catalogo}
+          onClose={() => setShowQrEtiquetas(false)}
+          onToast={onToast}
         />
       )}
     </div>
