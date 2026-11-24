@@ -6,7 +6,9 @@ import {
   confirmarAvisos,
   esEntero,
   fcorta,
+  findCatalogoOp,
   hoy,
+  normOpLookup,
 } from '../utils/helpers';
 import { K_IGRID, ld, sv } from '../services/storage';
 import { descargarXml, xmlIngresos } from '../services/excel';
@@ -19,6 +21,9 @@ interface IngresosTabProps {
   ingresos: Ingreso[];
   onIngresosChange: (newIngs: Ingreso[], toSend?: Ingreso[]) => void;
   catalogo: CatalogoOp[];
+  catLoading?: boolean;
+  catErr?: string;
+  onRecargarCatalogo?: () => void;
   nombres: string[];
   modoIng: 'tabla' | 'form';
   onModoIngChange: (m: 'tabla' | 'form') => void;
@@ -35,6 +40,9 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
   ingresos,
   onIngresosChange,
   catalogo,
+  catLoading,
+  catErr,
+  onRecargarCatalogo,
   nombres,
   modoIng,
   onModoIngChange,
@@ -83,11 +91,7 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     sv(K_IGRID + (iFecha || 'x'), clean);
   };
 
-  const buscarCatalogo = (op: string) => {
-    const q = (op || '').trim().toLowerCase();
-    if (!q) return null;
-    return catalogo.find((c) => c.op.toLowerCase() === q) || null;
-  };
+  const buscarCatalogo = (op: string) => findCatalogoOp(catalogo, op);
 
   const aplicarOpForm = (m: CatalogoOp) => {
     setOpAplicada(m.op);
@@ -150,9 +154,13 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     w.push(avisoFecha(iFecha, 'ingreso'));
     avisoCant(u, c).forEach((a) => w.push(a));
     if (!m) {
-      w.push(
-        `La OP ${formOp.trim()} no está en el catálogo de OP${!formDesc && !formCliente ? ' y se guardará sin descripción ni cliente' : ''}`
-      );
+      if (!catalogo.length) {
+        w.push('El catálogo de OPs aún no está cargado (0 OP en memoria)');
+      } else {
+        w.push(
+          `La OP ${formOp.trim()} no está en el catálogo de OP${!formDesc && !formCliente ? ' y se guardará sin descripción ni cliente' : ''}`
+        );
+      }
     } else {
       if (!formDesc) w.push('La descripción está vacía');
       if (!formCliente) w.push('El cliente está vacío');
@@ -243,7 +251,7 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     o.total = u * c;
 
     if (!op) o.err.push('Falta OP');
-    else if (!o.m) o.warn.push('OP no está en el catálogo');
+    else if (!o.m) o.warn.push(!catalogo.length ? 'Catálogo sin cargar' : 'OP no está en el catálogo');
     if (o.m && (o.m.modelos || []).length > 1 && r.mod === '') o.err.push('Elige modelo');
     if (!(u > 0)) o.err.push('Falta unid.');
     if (!(c > 0)) o.err.push('Falta cant.');
@@ -533,16 +541,53 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     }
   };
 
-  const sugList = formOp.trim()
-    ? catalogo
-        .filter((c) =>
-          c.op.toLowerCase().includes(formOp.trim().toLowerCase())
-        )
-        .slice(0, 8)
-    : [];
+  const sugList = (() => {
+    const qRaw = formOp.trim().toLowerCase();
+    const qNorm = normOpLookup(formOp);
+    if (!qRaw && !qNorm) return [];
+    return catalogo
+      .filter((c) => {
+        const opLow = String(c.op || '').trim().toLowerCase();
+        if (qRaw && opLow.includes(qRaw)) return true;
+        return qNorm ? normOpLookup(opLow).includes(qNorm) : false;
+      })
+      .slice(0, 8);
+  })();
 
   return (
     <div id="t-ing">
+      {catalogo.length === 0 && (
+        <div
+          className="panel"
+          style={{
+            padding: '10px 14px',
+            marginBottom: '10px',
+            borderColor: catLoading ? 'var(--blue)' : 'var(--amber)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px',
+            flexWrap: 'wrap',
+            fontSize: '0.84rem',
+          }}
+        >
+          <span>
+            {catLoading
+              ? '⏳ Descargando catálogo de OPs desde Supabase...'
+              : `⚠️ El catálogo de OPs está vacío (0 OP)${catErr ? ` · ${catErr}` : ''}.`}
+          </span>
+          {onRecargarCatalogo && !catLoading && (
+            <button
+              type="button"
+              className="btn-s"
+              style={{ minHeight: '32px', padding: '4px 12px', borderColor: 'var(--amber)', fontWeight: 700 }}
+              onClick={onRecargarCatalogo}
+            >
+              🔄 Cargar catálogo ahora
+            </button>
+          )}
+        </div>
+      )}
       {/* Mode switcher */}
       <div className="chips modo" id="imodoReg">
         <button
@@ -752,7 +797,7 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
               <input
                 type="text"
                 className="mono"
-                placeholder="Ej. OP-10234"
+                placeholder="Ej. 260001"
                 autoComplete="off"
                 value={formOp}
                 onChange={(e) => {

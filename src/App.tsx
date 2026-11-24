@@ -21,6 +21,8 @@ import {
   K_REG,
   K_SES_ING,
   K_SESION,
+  idbGet,
+  idbSet,
   ld,
   requestStoragePersistence,
   sv,
@@ -58,7 +60,10 @@ export const App: React.FC = () => {
       return c;
     });
   });
+  const [catLoading, setCatLoading] = useState(false);
   const [catErr, setCatErr] = useState('');
+  const catCountRef = useRef(catalogo.length);
+  catCountRef.current = catalogo.length;
 
   const [registros, setRegistros] = useState<Registro[]>(() => {
     const raw = ld<Registro[]>(K_REG, []);
@@ -165,6 +170,8 @@ export const App: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(new Date());
   const syncBusyRef = useRef(false);
   const syncStartRef = useRef(0);
+  const syncFailCountRef = useRef(0);
+  const syncNextRetryRef = useRef(0);
   const lastKeyTimeRef = useRef(0);
   const firmaRef = useRef<{ reg?: string; ing?: string }>({});
 
@@ -270,44 +277,66 @@ export const App: React.FC = () => {
 
   // Sheets sync methods
   const enviarRegistros = useCallback(
-    async (rs: Registro[], showToast = false) => {
+    async (rs: Registro[], showToast = false): Promise<boolean> => {
       const validos = soloValidos(rs, showToast, toast);
-      if (!validos.length) return;
+      if (!validos.length) return true;
       try {
-        await llamar({ action: 'upsert', records: validos });
-        const validIds = new Set(validos.map((x) => x.id));
-        const updated = registrosRef.current.map((r) =>
-          validIds.has(r.id) ? { ...r, sync: true } : r
-        );
-        setRegistros(updated);
-        sv(K_REG, updated);
+        const CHUNK = 25;
+        for (let i = 0; i < validos.length; i += CHUNK) {
+          const batch = validos.slice(i, i + CHUNK);
+          await llamar({ action: 'upsert', records: batch });
+          const batchIds = new Set(batch.map((x) => x.id));
+          const updated = registrosRef.current.map((r) =>
+            batchIds.has(r.id) ? { ...r, sync: true } : r
+          );
+          registrosRef.current = updated;
+          setRegistros(updated);
+          sv(K_REG, updated);
+        }
+        setSyncOk(true);
+        setLastSyncTime(new Date());
         if (showToast) toast('ok', `Enviado a Sheets (${validos.length})`);
+        return true;
       } catch (err: any) {
-        if (showToast || navigator.onLine) {
+        setSyncOk(false);
+        setLastSyncTime(new Date());
+        if (showToast) {
           toast('error', `Sheets: ${String(err.message || err).slice(0, 120)}`);
         }
+        return false;
       }
     },
     [toast]
   );
 
   const enviarIngresos = useCallback(
-    async (rs: Ingreso[], showToast = false) => {
+    async (rs: Ingreso[], showToast = false): Promise<boolean> => {
       const validos = soloValidos(rs, showToast, toast);
-      if (!validos.length) return;
+      if (!validos.length) return true;
       try {
-        await llamar({ action: 'upsert', tabla: 'ingresos', records: validos });
-        const validIds = new Set(validos.map((x) => x.id));
-        const updated = ingresosRef.current.map((r) =>
-          validIds.has(r.id) ? { ...r, sync: true } : r
-        );
-        setIngresos(updated);
-        sv(K_ING, updated);
+        const CHUNK = 25;
+        for (let i = 0; i < validos.length; i += CHUNK) {
+          const batch = validos.slice(i, i + CHUNK);
+          await llamar({ action: 'upsert', tabla: 'ingresos', records: batch });
+          const batchIds = new Set(batch.map((x) => x.id));
+          const updated = ingresosRef.current.map((r) =>
+            batchIds.has(r.id) ? { ...r, sync: true } : r
+          );
+          ingresosRef.current = updated;
+          setIngresos(updated);
+          sv(K_ING, updated);
+        }
+        setSyncOk(true);
+        setLastSyncTime(new Date());
         if (showToast) toast('ok', `Enviado a Sheets (${validos.length})`);
+        return true;
       } catch (err: any) {
-        if (showToast || navigator.onLine) {
+        setSyncOk(false);
+        setLastSyncTime(new Date());
+        if (showToast) {
           toast('error', `Sheets: ${String(err.message || err).slice(0, 120)}`);
         }
+        return false;
       }
     },
     [toast]
@@ -477,87 +506,170 @@ export const App: React.FC = () => {
   );
 
   // AutoSync cycle
-  const runAutoSync = useCallback(async () => {
-    const isTyping = Date.now() - lastKeyTimeRef.current < 4000;
-    if (isTyping) return;
-    if (syncBusyRef.current && Date.now() - syncStartRef.current < 30000) return;
-    if (!navigator.onLine) return;
+  const runAutoSync = useCallback(
+    async (force = false) => {
+      const isTyping = Date.now() - lastKeyTimeRef.current < 4000;
+      if (!force && isTyping) return;
+      if (!force && Date.now() < syncNextRetryRef.current) return;
+      if (syncBusyRef.current && Date.now() - syncStartRef.current < 45000) return;
+      if (!navigator.onLine) return;
 
-    syncBusyRef.current = true;
-    syncStartRef.current = Date.now();
+      syncBusyRef.current = true;
+      syncStartRef.current = Date.now();
 
-    try {
-      await procesarDel();
-      const pr = registrosRef.current.filter((r) => !r.sync);
-      const pi = ingresosRef.current.filter((r) => !r.sync);
-      if (pr.length) await enviarRegistros(pr, false);
-      if (pi.length) await enviarIngresos(pi, false);
-      await traerRegistros(true);
-      await traerIngresos(true);
-      setSyncOk(true);
-      setLastSyncTime(new Date());
-    } catch {
-      setSyncOk(false);
-      setLastSyncTime(new Date());
-    } finally {
-      syncBusyRef.current = false;
-    }
-  }, [enviarRegistros, enviarIngresos, traerRegistros, traerIngresos]);
+      try {
+        await procesarDel();
+        const pr = registrosRef.current.filter((r) => !r.sync);
+        const pi = ingresosRef.current.filter((r) => !r.sync);
+        const okR = pr.length ? await enviarRegistros(pr, false) : true;
+        const okI = pi.length ? await enviarIngresos(pi, false) : true;
+        await traerRegistros(true);
+        await traerIngresos(true);
+        if (!okR || !okI) throw new Error('Pendiente de envío');
+        syncFailCountRef.current = 0;
+        syncNextRetryRef.current = 0;
+        setSyncOk(true);
+        setLastSyncTime(new Date());
+      } catch {
+        syncFailCountRef.current = Math.min(syncFailCountRef.current + 1, 4);
+        const waitMs = Math.min(60000, 15000 * Math.pow(2, syncFailCountRef.current - 1));
+        syncNextRetryRef.current = Date.now() + waitMs;
+        setSyncOk(false);
+        setLastSyncTime(new Date());
+      } finally {
+        syncBusyRef.current = false;
+      }
+    },
+    [enviarRegistros, enviarIngresos, traerRegistros, traerIngresos]
+  );
 
   // AutoSync timer
   useEffect(() => {
-    const t = setTimeout(runAutoSync, 1000);
+    const t = setTimeout(() => runAutoSync(false), 1500);
     const interval = setInterval(() => {
-      if (!document.hidden) runAutoSync();
-    }, 5000);
+      if (!document.hidden) runAutoSync(false);
+    }, 15000);
 
-    const handleFocus = () => runAutoSync();
+    const handleFocus = () => {
+      if (Date.now() - syncStartRef.current > 8000) runAutoSync(false);
+    };
     const handleVisibility = () => {
-      if (!document.hidden) runAutoSync();
+      if (!document.hidden && Date.now() - syncStartRef.current > 8000) {
+        runAutoSync(false);
+      }
+    };
+    const handleOnlineSync = () => {
+      syncNextRetryRef.current = 0;
+      syncFailCountRef.current = 0;
+      runAutoSync(true);
     };
 
     window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('online', handleOnlineSync);
 
     return () => {
       clearTimeout(t);
       clearInterval(interval);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('online', handleOnlineSync);
     };
   }, [runAutoSync]);
 
-  // Initial Supabase Catalog Auto-Refresh (once every 4 hours)
-  useEffect(() => {
-    const lastCatTs = parseInt(localStorage.getItem(K_CATTS) || '0', 10) || 0;
-    if (!catalogo.length || Date.now() - lastCatTs >= CAT_HORAS * 3600 * 1000) {
-      leerCatalogoSb()
-        .then((rows) => {
-          const mp: Record<string, CatalogoOp> = {};
-          const ord: string[] = [];
-          rows.forEach((r) => {
-            const it = normOpSb(r);
-            if (!it) return;
-            const k = it.op.toLowerCase();
-            if (!(k in mp)) ord.push(k);
-            mp[k] = it;
-          });
-          const nuevo = ord.map((k) => mp[k]);
-          if (nuevo.length) {
-            setCatalogo(nuevo);
-            sv(K_CAT, nuevo);
-            localStorage.setItem(K_CATTS, String(Date.now()));
-            setCatErr('');
-          }
-        })
-        .catch((e) => {
-          setCatErr(String(e?.message || e).slice(0, 100));
-        });
+  const cargarCatalogoSb = useCallback(async (showFeedback = false): Promise<boolean> => {
+    setCatLoading(true);
+    try {
+      const rows = await leerCatalogoSb();
+      const mp: Record<string, CatalogoOp> = {};
+      const ord: string[] = [];
+      rows.forEach((r) => {
+        const it = normOpSb(r);
+        if (!it) return;
+        const k = it.op.toLowerCase();
+        if (!(k in mp)) ord.push(k);
+        mp[k] = it;
+      });
+      const nuevo = ord.map((k) => mp[k]);
+      if (nuevo.length) {
+        catCountRef.current = nuevo.length;
+        setCatalogo(nuevo);
+        idbSet(K_CAT, nuevo);
+        sv(K_CAT, nuevo);
+        try {
+          localStorage.setItem(K_CATTS, String(Date.now()));
+        } catch {}
+        setCatErr('');
+        if (showFeedback) toast('ok', `Catálogo cargado: ${nuevo.length} OP`);
+        return true;
+      }
+      throw new Error('Supabase devolvió 0 OP');
+    } catch (e: any) {
+      const msg = String(e?.message || e).slice(0, 100);
+      setCatErr(msg);
+      if (showFeedback) toast('error', `No se pudo cargar catálogo: ${msg.slice(0, 70)}`);
+      return false;
+    } finally {
+      setCatLoading(false);
     }
-  }, []); // Run once on mount
+  }, [toast]);
+
+  // Initial Catalog Hydration (IndexedDB fallback + Supabase Auto-Refresh with retry if empty)
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const initCatalogo = async () => {
+      let hasLocal = catCountRef.current > 0;
+      if (!hasLocal) {
+        const cachedIdb = await idbGet<CatalogoOp[]>(K_CAT);
+        if (!cancelled && Array.isArray(cachedIdb) && cachedIdb.length > 0) {
+          const normalized = cachedIdb.map((c) =>
+            !c.modelos ? { ...c, modelos: [{ descripcion: c.descripcion || '', sap: c.sap || '' }] } : c
+          );
+          catCountRef.current = normalized.length;
+          setCatalogo(normalized);
+          sv(K_CAT, normalized);
+          hasLocal = true;
+        }
+      } else {
+        // Ensure IndexedDB also holds a copy of localStorage catalog
+        idbSet(K_CAT, catalogo);
+      }
+
+      const lastCatTs = parseInt(localStorage.getItem(K_CATTS) || '0', 10) || 0;
+      if (!hasLocal || Date.now() - lastCatTs >= CAT_HORAS * 3600 * 1000) {
+        const ok = await cargarCatalogoSb(false);
+        if (!ok && !cancelled && catCountRef.current === 0) {
+          retryTimer = setTimeout(() => {
+            if (!cancelled && catCountRef.current === 0 && navigator.onLine) {
+              cargarCatalogoSb(false);
+            }
+          }, 5000);
+        }
+      }
+    };
+
+    initCatalogo();
+
+    const handleOnlineCat = () => {
+      if (catCountRef.current === 0) {
+        cargarCatalogoSb(false);
+      }
+    };
+    window.addEventListener('online', handleOnlineCat);
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      window.removeEventListener('online', handleOnlineCat);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cargarCatalogoSb]);
 
   // Handle Updates
   const handleRegistrosChange = (newRegs: Registro[], toSend?: Registro[]) => {
+    registrosRef.current = newRegs;
     setRegistros(newRegs);
     sv(K_REG, newRegs);
     if (toSend && toSend.length) {
@@ -566,6 +678,7 @@ export const App: React.FC = () => {
   };
 
   const handleIngresosChange = (newIngs: Ingreso[], toSend?: Ingreso[]) => {
+    ingresosRef.current = newIngs;
     setIngresos(newIngs);
     sv(K_ING, newIngs);
     if (toSend && toSend.length) {
@@ -589,26 +702,18 @@ export const App: React.FC = () => {
   };
 
   const handleCatalogoChange = (newC: CatalogoOp[]) => {
+    catCountRef.current = newC.length;
     setCatalogo(newC);
+    idbSet(K_CAT, newC);
     sv(K_CAT, newC);
   };
 
   const handleBorrarRemotoRegistro = (id: string) => {
-    const a = colaDel();
-    if (!a.some((x) => x.id === id && x.tabla === 'registros')) {
-      a.push({ id, tabla: 'registros' });
-    }
-    sv('ctrl_borrados', a);
-    procesarDel();
+    encolarDel(id, 'registros');
   };
 
   const handleBorrarRemotoIngreso = (id: string) => {
-    const a = colaDel();
-    if (!a.some((x) => x.id === id && x.tabla === 'ingresos')) {
-      a.push({ id, tabla: 'ingresos' });
-    }
-    sv('ctrl_borrados', a);
-    procesarDel();
+    encolarDel(id, 'ingresos');
   };
 
   const handleInstallClick = () => {
@@ -665,6 +770,9 @@ export const App: React.FC = () => {
             registros={registros}
             onRegistrosChange={handleRegistrosChange}
             catalogo={catalogo}
+            catLoading={catLoading}
+            catErr={catErr}
+            onRecargarCatalogo={() => cargarCatalogoSb(true)}
             planes={planes}
             planesOp={planesOp}
             onPlanesChange={handlePlanesChange}
@@ -709,6 +817,9 @@ export const App: React.FC = () => {
             ingresos={ingresos}
             onIngresosChange={handleIngresosChange}
             catalogo={catalogo}
+            catLoading={catLoading}
+            catErr={catErr}
+            onRecargarCatalogo={() => cargarCatalogoSb(true)}
             nombres={nombres}
             modoIng={modoIng}
             onModoIngChange={setModoIng}
@@ -752,7 +863,9 @@ export const App: React.FC = () => {
         pendingCount={pendingCount}
         onSyncNow={() => {
           syncBusyRef.current = false;
-          runAutoSync();
+          syncNextRetryRef.current = 0;
+          syncFailCountRef.current = 0;
+          runAutoSync(true);
         }}
       />
     </div>

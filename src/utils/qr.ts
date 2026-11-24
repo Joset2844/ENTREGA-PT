@@ -1,5 +1,5 @@
 import { CatalogoOp } from '../types';
-import { extraerSaps } from './helpers';
+import { extraerSaps, findCatalogoOp } from './helpers';
 
 export interface QrOpPayload {
   op: string;
@@ -27,7 +27,7 @@ export interface QrParsedResult {
   sapMatchesCatOps: CatalogoOp[];
 }
 
-export type LabelSizeId = '100x50' | '100x100' | '70x40' | '50x30';
+export type LabelSizeId = '100x50' | '100x100' | '70x40' | '50x30' | 'custom';
 
 export const LABEL_SIZES: Record<
   LabelSizeId,
@@ -37,6 +37,7 @@ export const LABEL_SIZES: Record<
   '100x100': { id: '100x100', label: '100 × 100 mm (Pallet / Caja grande)', widthMm: 100, heightMm: 100, qrDots: 7 },
   '70x40': { id: '70x40', label: '70 × 40 mm (Mediana)', widthMm: 70, heightMm: 40, qrDots: 4 },
   '50x30': { id: '50x30', label: '50 × 30 mm (Compacta)', widthMm: 50, heightMm: 30, qrDots: 3 },
+  custom: { id: 'custom', label: 'Medida personalizada (mm)', widthMm: 100, heightMm: 50, qrDots: 5 },
 };
 
 function cleanToken(s: string): string {
@@ -132,7 +133,7 @@ export function parseQrString(rawInput: string, catalogo: CatalogoOp[]): QrParse
     } else if (segments.length === 1) {
       const single = segments[0];
       // Match against catalog OP first
-      const exactOp = catalogo.find((x) => x.op.trim().toLowerCase() === single.toLowerCase());
+      const exactOp = findCatalogoOp(catalogo, single);
       if (exactOp) {
         op = exactOp.op;
       } else {
@@ -167,9 +168,7 @@ export function parseQrString(rawInput: string, catalogo: CatalogoOp[]): QrParse
   }
 
   // Resolve against catalog
-  const catMatch = op
-    ? catalogo.find((x) => x.op.trim().toLowerCase() === op.trim().toLowerCase()) || null
-    : null;
+  const catMatch = op ? findCatalogoOp(catalogo, op) : null;
 
   let modeloIdx = -1;
   if (catMatch) {
@@ -242,30 +241,54 @@ export function buildZplLabel(
   item: QrOpPayload,
   qrData: string,
   sizeId: LabelSizeId,
-  copies = 1
+  copies = 1,
+  customSize?: { widthMm: number; heightMm: number }
 ): string {
-  const sz = LABEL_SIZES[sizeId] || LABEL_SIZES['100x50'];
-  const pw = Math.round(sz.widthMm * 8); // 203 dpi ~ 8 dots/mm
-  const ll = Math.round(sz.heightMm * 8);
-  const margin = 24;
-  const textX = sizeId === '50x30' ? 175 : sizeId === '70x40' ? 235 : 290;
-  const textWidth = Math.max(180, pw - textX - margin);
+  const base = LABEL_SIZES[sizeId] || LABEL_SIZES['100x50'];
+  const widthMm =
+    sizeId === 'custom' && customSize
+      ? Math.min(200, Math.max(25, Math.round(customSize.widthMm || 100)))
+      : base.widthMm;
+  const heightMm =
+    sizeId === 'custom' && customSize
+      ? Math.min(200, Math.max(20, Math.round(customSize.heightMm || 50)))
+      : base.heightMm;
+  const minDim = Math.min(widthMm, heightMm);
+  const qrDots =
+    sizeId === 'custom'
+      ? minDim <= 32
+        ? 3
+        : minDim <= 45
+        ? 4
+        : minDim >= 85
+        ? 7
+        : 5
+      : base.qrDots;
+
+  const isSmall = widthMm <= 55 || heightMm <= 34;
+  const isMedium = !isSmall && (widthMm <= 75 || heightMm <= 44);
+
+  const pw = Math.round(widthMm * 8); // 203 dpi ~ 8 dots/mm
+  const ll = Math.round(heightMm * 8);
+  const margin = isSmall ? 16 : 24;
+  const textX = isSmall ? 165 : isMedium ? 225 : Math.min(295, Math.round(pw * 0.37));
+  const textWidth = Math.max(150, pw - textX - margin);
 
   const lines: string[] = [
     '^XA',
     '^CI28',
     `^PW${pw}`,
     `^LL${ll}`,
-    `^FO${margin},${margin}^BQN,2,${sz.qrDots}^FDQA,${zplSafe(qrData)}^FS`,
-    `^FO${textX},${margin}^A0N,${sizeId === '50x30' ? 28 : 40},${sizeId === '50x30' ? 28 : 40}^FDOP: ${zplSafe(item.op)}^FS`,
+    `^FO${margin},${margin}^BQN,2,${qrDots}^FDQA,${zplSafe(qrData)}^FS`,
+    `^FO${textX},${margin}^A0N,${isSmall ? 26 : 38},${isSmall ? 26 : 38}^FDOP: ${zplSafe(item.op)}^FS`,
   ];
 
-  let y = margin + (sizeId === '50x30' ? 34 : 48);
+  let y = margin + (isSmall ? 32 : 46);
   if (item.sap) {
     lines.push(
-      `^FO${textX},${y}^A0N,${sizeId === '50x30' ? 22 : 30},${sizeId === '50x30' ? 22 : 30}^FDSAP: ${zplSafe(item.sap)}^FS`
+      `^FO${textX},${y}^A0N,${isSmall ? 20 : 28},${isSmall ? 20 : 28}^FDSAP: ${zplSafe(item.sap)}^FS`
     );
-    y += sizeId === '50x30' ? 28 : 36;
+    y += isSmall ? 26 : 34;
   }
   if (item.cli) {
     lines.push(

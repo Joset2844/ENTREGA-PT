@@ -43,58 +43,114 @@ export function colaDel(): DelQueueItem[] {
   return Array.isArray(a) ? a : [];
 }
 
+let delTimer: ReturnType<typeof setTimeout> | null = null;
+let delInFlight: Promise<void> | null = null;
+let rpcQueue: Promise<any> = Promise.resolve();
+
 export function encolarDel(id: string, tabla: 'registros' | 'ingresos'): void {
   const a = colaDel();
   if (!a.some((x) => x.id === id && x.tabla === tabla)) {
     a.push({ id, tabla });
+    sv(K_DEL, a);
   }
-  sv(K_DEL, a);
-  procesarDel();
+  if (delTimer) clearTimeout(delTimer);
+  delTimer = setTimeout(() => {
+    delTimer = null;
+    procesarDel();
+  }, 200);
 }
 
-export async function llamar(payload: any): Promise<any> {
-  const c = cfgSb();
-  if (!c.url) throw new Error('Sin URL configurada');
-  payload.token = c.token;
-
+async function ejecutarFetchSheets(url: string, payload: any): Promise<any> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
   try {
-    const res = await fetch(c.url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     });
     const text = await res.text();
     let json: any;
     try {
       json = JSON.parse(text);
     } catch {
-      throw new Error(
+      const err = new Error(
         "El script no devolvió datos válidos. Implementa una NUEVA VERSIÓN con acceso 'Cualquier persona'"
       );
+      (err as any).fromScript = true;
+      throw err;
     }
-    if (!json.ok) throw new Error(json.error || 'Error del script');
+    if (!json.ok) {
+      const err = new Error(json.error || 'Error del script');
+      (err as any).fromScript = true;
+      throw err;
+    }
     return json;
-  } catch (err: any) {
-    if (err.message && err.message.includes('script no devolvió')) throw err;
-    throw new Error(
-      "No se pudo conectar. Revisa internet y que el acceso del script sea 'Cualquier persona'"
-    );
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
+export function llamar(payload: any): Promise<any> {
+  const c = cfgSb();
+  if (!c.url) return Promise.reject(new Error('Sin URL configurada'));
+  const bodyPayload = { ...payload, token: c.token };
+
+  const task = rpcQueue.then(async () => {
+    let lastErr: any;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+        const result = await ejecutarFetchSheets(c.url, bodyPayload);
+        // Small gap between consecutive Google Apps Script requests
+        await new Promise((r) => setTimeout(r, 150));
+        return result;
+      } catch (err: any) {
+        lastErr = err;
+        if (err?.fromScript && !String(err.message || '').includes('script no devolvió')) {
+          throw err;
+        }
+      }
+    }
+    if (lastErr?.fromScript) throw lastErr;
+    throw new Error(
+      "No se pudo conectar. Revisa internet y que el acceso del script sea 'Cualquier persona'"
+    );
+  });
+
+  rpcQueue = task.catch(() => {});
+  return task;
+}
+
 export async function procesarDel(): Promise<void> {
+  if (delInFlight) return delInFlight;
   const a = colaDel();
   if (!a.length || !navigator.onLine || !cfgSb().url) return;
 
-  for (const x of a) {
+  delInFlight = (async () => {
     try {
-      const pl: any = { action: 'delete', id: x.id };
-      if (x.tabla === 'ingresos') pl.tabla = 'ingresos';
-      await llamar(pl);
-      const remaining = colaDel().filter((y) => !(y.id === x.id && y.tabla === x.tabla));
-      sv(K_DEL, remaining);
-    } catch {}
-  }
+      const snapshot = colaDel();
+      for (const x of snapshot) {
+        try {
+          const pl: any = { action: 'delete', id: x.id };
+          if (x.tabla === 'ingresos') pl.tabla = 'ingresos';
+          await llamar(pl);
+          const remaining = colaDel().filter((y) => !(y.id === x.id && y.tabla === x.tabla));
+          sv(K_DEL, remaining);
+        } catch {
+          // Stop processing queue if offline/rate-limited; next cycle retries
+          break;
+        }
+      }
+    } finally {
+      delInFlight = null;
+    }
+  })();
+
+  return delInFlight;
 }
 
 export function normFecha(v: any): string {

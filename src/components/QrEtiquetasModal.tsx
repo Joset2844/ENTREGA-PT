@@ -36,12 +36,24 @@ export const QrEtiquetasModal: React.FC<QrEtiquetasModalProps> = ({
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [activeKey, setActiveKey] = useState<string>('');
   const [sizeId, setSizeId] = useState<LabelSizeId>('100x50');
+  const [customW, setCustomW] = useState('100');
+  const [customH, setCustomH] = useState('50');
   const [copies, setCopies] = useState('1');
   const [unidEmp, setUnidEmp] = useState('');
   const [empaque, setEmpaque] = useState<'caja' | 'paquete'>('caja');
   const [incluirPed, setIncluirPed] = useState(true);
   const [previewUrl, setPreviewUrl] = useState('');
   const [showGuide, setShowGuide] = useState(false);
+
+  const resolvedDims = useMemo(() => {
+    if (sizeId === 'custom') {
+      const w = Math.min(200, Math.max(25, Number(customW) || 100));
+      const h = Math.min(200, Math.max(20, Number(customH) || 50));
+      return { widthMm: w, heightMm: h };
+    }
+    const sz = LABEL_SIZES[sizeId] || LABEL_SIZES['100x50'];
+    return { widthMm: sz.widthMm, heightMm: sz.heightMm };
+  }, [sizeId, customW, customH]);
 
   const flatRows: CatalogFlatRow[] = useMemo(() => {
     const out: CatalogFlatRow[] = [];
@@ -155,7 +167,7 @@ export const QrEtiquetasModal: React.FC<QrEtiquetasModalProps> = ({
       return;
     }
 
-    const sz = LABEL_SIZES[sizeId];
+    const { widthMm, heightMm } = resolvedDims;
     const numCopies = Math.min(50, Math.max(1, parseInt(copies, 10) || 1));
 
     const escapeHtml = (s: string) =>
@@ -197,20 +209,27 @@ export const QrEtiquetasModal: React.FC<QrEtiquetasModalProps> = ({
       }
     });
 
-    const isSmall = sizeId === '50x30';
-    const isMedium = sizeId === '70x40';
-    const qrMm = isSmall ? 22 : isMedium ? 28 : sizeId === '100x100' ? 46 : 38;
+    const isSmall = widthMm <= 55 || heightMm <= 34;
+    const isMedium = !isSmall && (widthMm <= 75 || heightMm <= 44);
+    const isSquareLarge = widthMm >= 80 && heightMm >= 80;
+    const qrMm = isSmall
+      ? Math.max(16, Math.min(24, heightMm - 7))
+      : isMedium
+      ? Math.max(22, Math.min(30, heightMm - 10))
+      : isSquareLarge
+      ? Math.min(48, Math.round(heightMm * 0.46))
+      : Math.max(26, Math.min(40, heightMm - 11));
 
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Etiquetas QR</title>
       <style>
-        @page { size: ${sz.widthMm}mm ${sz.heightMm}mm; margin: 1.5mm; }
+        @page { size: ${widthMm}mm ${heightMm}mm; margin: 1.5mm; }
         * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         body { margin: 0; font-family: Arial, sans-serif; color: #000; }
         .lbl {
-          width: ${sz.widthMm - 3}mm;
-          height: ${sz.heightMm - 3}mm;
+          width: ${widthMm - 3}mm;
+          height: ${heightMm - 3}mm;
           display: flex;
-          flex-direction: ${sizeId === '100x100' ? 'column' : 'row'};
+          flex-direction: ${isSquareLarge ? 'column' : 'row'};
           align-items: center;
           gap: ${isSmall ? '2mm' : '3mm'};
           padding: ${isSmall ? '1.5mm' : '2.5mm'};
@@ -297,7 +316,7 @@ export const QrEtiquetasModal: React.FC<QrEtiquetasModalProps> = ({
     const zpl = rowsToOutput
       .map((row) => {
         const payload = buildPayloadForRow(row);
-        return buildZplLabel(payload, buildQrString(payload), sizeId, numCopies);
+        return buildZplLabel(payload, buildQrString(payload), sizeId, numCopies, resolvedDims);
       })
       .join('\n\n');
 
@@ -311,6 +330,54 @@ export const QrEtiquetasModal: React.FC<QrEtiquetasModalProps> = ({
     a.remove();
     setTimeout(() => URL.revokeObjectURL(u), 3000);
     onToast('ok', `Archivo .zpl descargado (${rowsToOutput.length} etiqueta(s))`);
+  };
+
+  const handleCopyQrText = async () => {
+    if (!activeQrData) {
+      onToast('error', 'Selecciona una OP del catálogo');
+      return;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(activeQrData);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = activeQrData;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      onToast('ok', `Texto QR copiado (${activeRow?.op || ''}) — pégalo en zDesign`);
+    } catch {
+      onToast('error', 'No se pudo copiar automáticamente; selecciona el texto azul "QR:"');
+    }
+  };
+
+  const handleDownloadQrPng = async () => {
+    if (!activeRow || !activeQrData) {
+      onToast('error', 'Selecciona una OP del catálogo');
+      return;
+    }
+    try {
+      const url = await QRCode.toDataURL(activeQrData, {
+        width: 480,
+        margin: 2,
+        errorCorrectionLevel: 'M',
+      });
+      const safeOp = activeRow.op.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `QR_OP_${safeOp}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      onToast('ok', `Imagen QR_OP_${safeOp}.png descargada`);
+    } catch {
+      onToast('error', 'No se pudo generar la imagen PNG del QR');
+    }
   };
 
   return (
@@ -369,7 +436,7 @@ export const QrEtiquetasModal: React.FC<QrEtiquetasModalProps> = ({
                 color: showGuide ? 'var(--blue)' : undefined,
               }}
             >
-              {showGuide ? 'Ocultar guía zDesign' : '📘 Guía zDesign'}
+              {showGuide ? 'Ocultar guía zDesign' : '📘 Guía zDesign Básico'}
             </button>
             <button
               type="button"
@@ -395,20 +462,20 @@ export const QrEtiquetasModal: React.FC<QrEtiquetasModalProps> = ({
             }}
           >
             <div style={{ fontWeight: 700, color: 'var(--blue)', marginBottom: '6px' }}>
-              Cómo usar tu Catálogo en ZebraDesigner (zDesign) en 4 pasos:
+              Cómo imprimir desde el Catálogo usando ZebraDesigner Básico (sin base de datos):
             </div>
+            <p style={{ margin: '0 0 8px', color: 'var(--muted)' }}>
+              ZebraDesigner Básico (Essentials) no incluye conexión a Excel. Puedes imprimir sin pagar licencia usando cualquiera de estas 3 formas:
+            </p>
             <ol style={{ margin: 0, paddingLeft: '18px' }}>
               <li>
-                Haz clic en <strong>Exportar Excel zDesign</strong> (abajo) para descargar tu catálogo con la columna lista <code>QR_DATA</code> (ej. <code>OP:260001|SAP:100234|PED:20000</code>).
+                <strong>Opción 1 — Imprimir directo desde aquí (más rápida):</strong> Marca las OPs, elige la medida de tu rollo (o pon <em>Medida personalizada</em>) y pulsa <strong>Imprimir etiqueta(s)</strong>. En la ventana de Windows selecciona tu impresora <strong>Zebra</strong>.
               </li>
               <li>
-                En <strong>ZebraDesigner</strong>, crea una etiqueta del tamaño de tu rollo y ve a <strong>Datos → Conectar base de datos</strong> eligiendo ese archivo <code>.xlsx</code> (hoja <code>Catalogo_QR</code>).
+                <strong>Opción 2 — Usar tu plantilla en ZebraDesigner Básico:</strong> Selecciona la OP y pulsa <strong>📋 Copiar texto QR</strong> para pegarlo en un objeto <em>Código QR → Datos fijos</em> dentro de zDesign, o pulsa <strong>🖼️ Descargar PNG</strong> para insertar la imagen del QR directo en tu etiqueta.
               </li>
               <li>
-                Inserta un objeto <strong>Código QR</strong> y enlaza su contenido al campo <code>QR_DATA</code>; añade textos visibles enlazados a <code>OP</code>, <code>SAP</code>, <code>CLIENTE</code> y <code>DESCRIPCION</code>.
-              </li>
-              <li>
-                Al imprimir, elige las filas que necesites en zDesign — o usa <strong>Imprimir directo</strong> / <strong>Descargar .ZPL</strong> aquí mismo si tu impresora Zebra ya está instalada en Windows.
+                <strong>Opción 3 — Archivo .ZPL (máxima nitidez):</strong> Pulsa <strong>⚡ .ZPL</strong> y envíalo a la impresora con la herramienta gratuita <em>Zebra Setup Utilities → Open Communication / Send File</em>.
               </li>
             </ol>
           </div>
@@ -570,6 +637,35 @@ export const QrEtiquetasModal: React.FC<QrEtiquetasModalProps> = ({
                 </div>
               </div>
 
+              {sizeId === 'custom' && (
+                <div className="row2" style={{ gap: '8px' }}>
+                  <div className="field" style={{ marginBottom: '8px' }}>
+                    <label>Ancho etiqueta (mm)</label>
+                    <input
+                      type="number"
+                      min="25"
+                      max="200"
+                      className="mono"
+                      value={customW}
+                      onChange={(e) => setCustomW(e.target.value)}
+                      style={{ minHeight: '38px' }}
+                    />
+                  </div>
+                  <div className="field" style={{ marginBottom: '8px' }}>
+                    <label>Alto etiqueta (mm)</label>
+                    <input
+                      type="number"
+                      min="20"
+                      max="200"
+                      className="mono"
+                      value={customH}
+                      onChange={(e) => setCustomH(e.target.value)}
+                      style={{ minHeight: '38px' }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="row2" style={{ gap: '8px' }}>
                 <div className="field" style={{ marginBottom: '8px' }}>
                   <label>Unid. x empaque en QR (opcional)</label>
@@ -675,34 +771,54 @@ export const QrEtiquetasModal: React.FC<QrEtiquetasModalProps> = ({
                   style={{ minHeight: '42px', fontSize: '0.92rem' }}
                   onClick={handlePrintLabels}
                 >
-                  🖨️ Imprimir {rowsToOutput.length} etiqueta(s) en impresora
+                  🖨️ Imprimir {rowsToOutput.length} etiqueta(s) en Zebra / impresora ({resolvedDims.widthMm}×{resolvedDims.heightMm}mm)
                 </button>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     className="btn-s"
                     style={{ flex: 1 }}
-                    onClick={() => handleExportZDesignExcel(false)}
-                    title="Exporta las OPs seleccionadas para vincular en ZebraDesigner"
+                    onClick={handleCopyQrText}
+                    title="Copia el texto del QR para pegarlo como Datos fijos en ZebraDesigner Básico"
                   >
-                    📊 Excel zDesign (Selec.)
+                    📋 Copiar texto QR
                   </button>
                   <button
                     type="button"
                     className="btn-s"
                     style={{ flex: 1 }}
-                    onClick={() => handleExportZDesignExcel(true)}
-                    title="Exporta todo el catálogo con columna QR_DATA para ZebraDesigner"
+                    onClick={handleDownloadQrPng}
+                    title="Descarga la imagen PNG del QR para insertarla en tu diseño de ZebraDesigner Básico"
                   >
-                    📚 Excel zDesign (Todo)
+                    🖼️ Descargar PNG
                   </button>
                   <button
                     type="button"
                     className="btn-s"
                     onClick={handleDownloadZpl}
-                    title="Archivo ZPL directo para impresoras térmicas Zebra"
+                    title="Archivo .ZPL directo para enviar con Zebra Setup Utilities"
                   >
                     ⚡ .ZPL
+                  </button>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn-s"
+                    style={{ flex: 1, fontSize: '0.78rem' }}
+                    onClick={() => handleExportZDesignExcel(false)}
+                    title="Excel con columna QR_DATA (solo seleccionado)"
+                  >
+                    📊 Excel (Selec.)
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-s"
+                    style={{ flex: 1, fontSize: '0.78rem' }}
+                    onClick={() => handleExportZDesignExcel(true)}
+                    title="Excel con todo el catálogo y columna QR_DATA"
+                  >
+                    📚 Excel (Todo)
                   </button>
                 </div>
               </div>

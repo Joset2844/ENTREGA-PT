@@ -14,25 +14,46 @@ export async function leerCatalogoSb(): Promise<any[]> {
   const out: any[] = [];
   let paginas = 0;
 
-  async function pagina(off: number): Promise<any[]> {
-    const res = await fetch(
-      `${SB_CAT_URL}/rest/v1/catalogo_op?select=op,datos&order=op.asc&limit=1000&offset=${off}`,
-      {
-        headers: {
-          apikey: SB_CAT_KEY,
-          Authorization: `Bearer ${SB_CAT_KEY}`,
-        },
-        cache: 'no-store',
+  async function fetchPaginaConReintento(off: number): Promise<any[]> {
+    let lastErr: any;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 700));
       }
-    );
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      try {
+        const res = await fetch(
+          `${SB_CAT_URL}/rest/v1/catalogo_op?select=op,datos&order=op.asc&limit=1000&offset=${off}`,
+          {
+            headers: {
+              apikey: SB_CAT_KEY,
+              Authorization: `Bearer ${SB_CAT_KEY}`,
+            },
+            cache: 'no-store',
+            signal: controller.signal,
+          }
+        );
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`HTTP ${res.status} ${text.slice(0, 80)}`);
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status} ${text.slice(0, 80)}`);
+        }
+
+        const rows = await res.json();
+        if (!Array.isArray(rows)) throw new Error('Respuesta inesperada de Supabase');
+        return rows;
+      } catch (err) {
+        lastErr = err;
+      } finally {
+        clearTimeout(timeoutId);
+      }
     }
+    throw lastErr || new Error('No se pudo conectar a Supabase');
+  }
 
-    const rows = await res.json();
-    if (!Array.isArray(rows)) throw new Error('Respuesta inesperada de Supabase');
+  async function pagina(off: number): Promise<any[]> {
+    const rows = await fetchPaginaConReintento(off);
     if (!rows.length || ++paginas > 200) return out;
     out.push(...rows);
     return pagina(off + rows.length);

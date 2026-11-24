@@ -21,7 +21,9 @@ import {
   esStock,
   extraerSaps,
   fcorta,
+  findCatalogoOp,
   LIM,
+  normOpLookup,
   pedidoDe,
   pedidoPlanOp,
   pedidoPlanSap,
@@ -60,6 +62,9 @@ interface RegistrarTabProps {
   registros: Registro[];
   onRegistrosChange: (newRegs: Registro[], toSend?: Registro[]) => void;
   catalogo: CatalogoOp[];
+  catLoading?: boolean;
+  catErr?: string;
+  onRecargarCatalogo?: () => void;
   planes: Record<string, PlanDespacho>;
   planesOp: Record<string, PlanOp>;
   onPlanesChange: (p: Record<string, PlanDespacho>) => void;
@@ -81,6 +86,9 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   registros,
   onRegistrosChange,
   catalogo,
+  catLoading,
+  catErr,
+  onRecargarCatalogo,
   planes,
   planesOp,
   onPlanesChange,
@@ -418,11 +426,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   };
 
   // Autocomplete catalog helper
-  const buscarCatalogo = (op: string) => {
-    const q = (op || '').trim().toLowerCase();
-    if (!q) return null;
-    return catalogo.find((c) => c.op.toLowerCase() === q) || null;
-  };
+  const buscarCatalogo = (op: string) => findCatalogoOp(catalogo, op);
 
   // Sync Pedido on OP / SAP change in form
   useEffect(() => {
@@ -578,9 +582,13 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     w.push(avisoFecha(fecha, 'registro'), avisoFecha(fdesp, 'despacho'));
     avisoCant(parseInt(formU, 10) || 0, parseInt(formC, 10) || 0).forEach((a) => w.push(a));
     if (!mAct) {
-      w.push(
-        `La OP ${formOp.trim()} no se encuentra en el catálogo${!formDesc && !formCliente ? ' y se guardará sin descripción ni cliente vinculados' : ''}`
-      );
+      if (!catalogo.length) {
+        w.push('El catálogo de OPs aún no está cargado (0 OP en memoria)');
+      } else {
+        w.push(
+          `La OP ${formOp.trim()} no se encuentra en el catálogo${!formDesc && !formCliente ? ' y se guardará sin descripción ni cliente vinculados' : ''}`
+        );
+      }
     } else {
       if (!formDesc) w.push('La descripción del producto está vacía');
       if (!formCliente) w.push('El nombre del cliente está vacío');
@@ -1287,7 +1295,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     o.prev = prev;
 
     if (!op) o.err.push('Falta OP');
-    else if (!o.m) o.warn.push('OP no está en el catálogo');
+    else if (!o.m) o.warn.push(!catalogo.length ? 'Catálogo sin cargar' : 'OP no está en el catálogo');
     if (!(o.ped > 0)) o.err.push('Falta pedido');
     if (!(parseInt(r.u, 10) > 0)) o.err.push('Falta unid.');
     if (!(parseInt(r.c, 10) > 0)) o.err.push('Falta cant.');
@@ -1681,19 +1689,56 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   const sapSummary = resumenSapsDespacho(fdesp, registros, planes, opExtra, catalogo);
 
   // Suggestions list for OP input
-  const sugList = formOp.trim()
-    ? catalogo
-        .filter((c) =>
-          c.op.toLowerCase().includes(formOp.trim().toLowerCase())
-        )
-        .slice(0, 8)
-    : [];
+  const sugList = (() => {
+    const qRaw = formOp.trim().toLowerCase();
+    const qNorm = normOpLookup(formOp);
+    if (!qRaw && !qNorm) return [];
+    return catalogo
+      .filter((c) => {
+        const opLow = String(c.op || '').trim().toLowerCase();
+        if (qRaw && opLow.includes(qRaw)) return true;
+        return qNorm ? normOpLookup(opLow).includes(qNorm) : false;
+      })
+      .slice(0, 8);
+  })();
 
   const currentPlan = planes[fdesp];
   const currentPlanOp = planesOp[fdesp];
 
   return (
     <div id="t-reg">
+      {catalogo.length === 0 && (
+        <div
+          className="panel"
+          style={{
+            padding: '10px 14px',
+            marginBottom: '10px',
+            borderColor: catLoading ? 'var(--blue)' : 'var(--amber)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px',
+            flexWrap: 'wrap',
+            fontSize: '0.84rem',
+          }}
+        >
+          <span>
+            {catLoading
+              ? '⏳ Descargando catálogo de OPs desde Supabase...'
+              : `⚠️ El catálogo de OPs está vacío (0 OP)${catErr ? ` · ${catErr}` : ''}.`}
+          </span>
+          {onRecargarCatalogo && !catLoading && (
+            <button
+              type="button"
+              className="btn-s"
+              style={{ minHeight: '32px', padding: '4px 12px', borderColor: 'var(--amber)', fontWeight: 700 }}
+              onClick={onRecargarCatalogo}
+            >
+              🔄 Cargar catálogo ahora
+            </button>
+          )}
+        </div>
+      )}
       {/* Despacho Bar */}
       <div className="panel" id="despachoBar">
         <div className="sec">Despacho</div>
@@ -2114,7 +2159,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
               <input
                 type="text"
                 className="mono"
-                placeholder="Ej. OP-10234"
+                placeholder="Ej. 260001"
                 autoComplete="off"
                 value={formOp}
                 onChange={(e) => {

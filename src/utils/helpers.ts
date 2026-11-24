@@ -370,6 +370,25 @@ export function compararSapConDespacho(
   };
 }
 
+export function normOpLookup(op: string): string {
+  return String(op || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^op[\s\-:._#]*/i, '')
+    .replace(/\.0+$/, '')
+    .replace(/\s+/g, '');
+}
+
+export function findCatalogoOp(catalogo: CatalogoOp[], op: string): CatalogoOp | null {
+  const raw = String(op || '').trim().toLowerCase();
+  if (!raw || !catalogo.length) return null;
+  const exact = catalogo.find((c) => String(c.op || '').trim().toLowerCase() === raw);
+  if (exact) return exact;
+  const norm = normOpLookup(raw);
+  if (!norm) return null;
+  return catalogo.find((c) => normOpLookup(c.op) === norm) || null;
+}
+
 export function pedidoDe(
   op: string,
   fd: string,
@@ -385,7 +404,7 @@ export function pedidoDe(
   if (u) return u;
 
   // Compare OP's SAP code(s) against SAP codes scheduled for dispatch
-  const m = catalogo.find((c) => c.op.toLowerCase() === op.trim().toLowerCase());
+  const m = findCatalogoOp(catalogo, op);
   const sapToUse = (sapOverride || '').trim() || sapsDeCatalogoOp(m).join(' + ');
   if (sapToUse) {
     const infoSap = compararSapConDespacho(sapToUse, fd, registros, planes, op);
