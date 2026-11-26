@@ -5,6 +5,7 @@ import { catTs, leerCatalogoSb, normOpSb } from '../services/supabase';
 import { K_CAT, K_CATTS, K_RES, ld, sv } from '../services/storage';
 import { archivoOk } from '../services/excel';
 import { hoy, norm, sanitizarStockDuplicados } from '../utils/helpers';
+import { ADMIN_EMAIL, createTeamUserAccount } from '../services/firebase';
 import { validoRec } from '../services/firestoreSync';
 import { QrEtiquetasModal } from './QrEtiquetasModal';
 
@@ -55,6 +56,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
 }) => {
   const [nombresTxt, setNombresTxt] = useState('');
   const [newEmailTxt, setNewEmailTxt] = useState('');
+  const [newUserPass, setNewUserPass] = useState('');
   const [savingTeam, setSavingTeam] = useState(false);
   const [pwaItems, setPwaItems] = useState<{ ok: boolean | null; text: string }[]>([]);
   const [ultimoRespaldo, setUltimoRespaldo] = useState<string | null>(() =>
@@ -189,11 +191,11 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
     onNombresChange(updated);
   };
 
-  // Team Gmail permissions
+  // Team user permissions & account creation
   const handleAddTeamEmail = async () => {
     const candidate = newEmailTxt.trim().toLowerCase();
     if (!candidate || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate)) {
-      onToast('error', 'Ingresa un correo Google válido');
+      onToast('error', 'Ingresa un correo electrónico válido');
       return;
     }
     if (teamEmails.includes(candidate)) {
@@ -201,14 +203,45 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
       return;
     }
     if (teamEmails.length >= 15) {
-      onToast('error', 'Máximo 15 correos autorizados en el equipo');
+      onToast('error', 'Máximo 15 usuarios autorizados en el equipo');
       return;
     }
+
+    const pass = newUserPass.trim();
+    if (pass && pass.length < 6) {
+      onToast('error', 'Si asignas contraseña, debe tener al menos 6 caracteres');
+      return;
+    }
+
     setSavingTeam(true);
     try {
+      if (pass) {
+        await createTeamUserAccount(candidate, pass);
+      }
       await onTeamEmailsChange([...teamEmails, candidate]);
       setNewEmailTxt('');
-      onToast('ok', `${candidate} agregado al equipo compartido`);
+      setNewUserPass('');
+      onToast(
+        'ok',
+        pass
+          ? `Usuario ${candidate} creado y autorizado (debe abrir el correo de verificación una vez)`
+          : `${candidate} autorizado en el equipo compartido`
+      );
+    } catch (err: any) {
+      const code = String(err?.code || '');
+      if (code === 'auth/email-already-in-use') {
+        await onTeamEmailsChange([...teamEmails, candidate]);
+        setNewEmailTxt('');
+        setNewUserPass('');
+        onToast('ok', `La cuenta ya existía; ${candidate} fue autorizado en el equipo`);
+      } else if (code === 'auth/operation-not-allowed') {
+        onToast(
+          'error',
+          'Activa «Email/Password» en Firebase Console → Authentication → Sign-in method para crear usuarios con clave.'
+        );
+      } else {
+        onToast('error', String(err?.message || 'No se pudo agregar al usuario'));
+      }
     } finally {
       setSavingTeam(false);
     }
@@ -603,60 +636,81 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
         </div>
 
         <div style={{ fontWeight: 700, fontSize: '0.86rem', marginBottom: '6px' }}>
-          Equipo autorizado ({teamEmails.length}/15)
+          Usuarios del equipo ({teamEmails.length}/15)
         </div>
-        <p className="info" style={{ margin: '0 0 8px', fontSize: '0.78rem' }}>
-          Agrega los correos Google de tus compañeros de planta o almacén para que compartan exactamente los mismos registros en tiempo real.
+        <p className="info" style={{ margin: '0 0 10px', fontSize: '0.78rem' }}>
+          Autoriza a tus compañeros por correo o créales su usuario con contraseña directamente aquí. Todos compartirán las entregas e ingresos en tiempo real.
         </p>
 
         {canManageTeam && (
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-            <input
-              type="email"
-              placeholder="correo.companero@gmail.com"
-              value={newEmailTxt}
-              onChange={(e) => setNewEmailTxt(e.target.value)}
-            />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+            <div className="row2" style={{ gap: '8px' }}>
+              <input
+                type="email"
+                placeholder="Correo del usuario"
+                value={newEmailTxt}
+                onChange={(e) => setNewEmailTxt(e.target.value)}
+              />
+              <input
+                type="password"
+                placeholder="Contraseña (opcional, mín. 6)"
+                value={newUserPass}
+                onChange={(e) => setNewUserPass(e.target.value)}
+              />
+            </div>
             <button
               type="button"
               className="btn-s"
               disabled={savingTeam}
-              style={{ whiteSpace: 'nowrap', borderColor: 'var(--amber)', fontWeight: 700 }}
+              style={{ borderColor: 'var(--amber)', fontWeight: 700, width: '100%' }}
               onClick={handleAddTeamEmail}
             >
-              {savingTeam ? '...' : '+ Autorizar'}
+              {savingTeam
+                ? 'Guardando...'
+                : newUserPass.trim()
+                ? '+ Crear usuario y autorizar acceso'
+                : '+ Autorizar correo existente'}
             </button>
           </div>
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {teamEmails.map((em) => (
-            <div
-              key={em}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '7px 10px',
-                borderRadius: '8px',
-                border: '1px solid var(--border)',
-                background: 'var(--field)',
-                fontSize: '0.84rem',
-              }}
-            >
-              <span className="mono">{em}</span>
-              {canManageTeam && em.toLowerCase() !== userEmail.toLowerCase() && (
-                <button
-                  type="button"
-                  className="del"
-                  disabled={savingTeam}
-                  onClick={() => handleRemoveTeamEmail(em)}
-                >
-                  Quitar
-                </button>
-              )}
-            </div>
-          ))}
+          {teamEmails.map((em) => {
+            const isAdm = em.toLowerCase() === ADMIN_EMAIL || em.toLowerCase() === userEmail.toLowerCase();
+            return (
+              <div
+                key={em}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '7px 10px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                  background: 'var(--field)',
+                  fontSize: '0.84rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {em}
+                  </span>
+                  <span className="user-role-tag">{isAdm ? 'Admin' : 'Usuario'}</span>
+                </div>
+                {canManageTeam && em.toLowerCase() !== userEmail.toLowerCase() && (
+                  <button
+                    type="button"
+                    className="del"
+                    disabled={savingTeam}
+                    onClick={() => handleRemoveTeamEmail(em)}
+                  >
+                    Quitar
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 

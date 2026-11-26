@@ -114,6 +114,7 @@ export const App: React.FC = () => {
   // Firebase Auth state
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [authRefreshTick, setAuthRefreshTick] = useState(0);
 
   // Navigation & prefill
   const [activeTab, setActiveTab] = useState<AppTab>('dash');
@@ -508,7 +509,7 @@ export const App: React.FC = () => {
       unsubExtra();
       unsubWs();
     };
-  }, [authReady, user]);
+  }, [authReady, user, authRefreshTick]);
 
   // Save session context
   useEffect(() => {
@@ -924,10 +925,19 @@ export const App: React.FC = () => {
     setActiveTab('reg');
   };
 
-  if (!authReady || !user) {
+  if (!authReady || !user || !user.emailVerified) {
     return (
       <AuthGate
         loading={!authReady}
+        unverifiedUser={user && !user.emailVerified ? user : null}
+        onRefreshVerification={async () => {
+          if (!auth.currentUser) return false;
+          await auth.currentUser.reload();
+          await auth.currentUser.getIdToken(true);
+          setUser(auth.currentUser);
+          setAuthRefreshTick((t) => t + 1);
+          return Boolean(auth.currentUser.emailVerified);
+        }}
         localStats={{
           registros: legacyRegistros.length,
           ingresos: legacyIngresos.length,

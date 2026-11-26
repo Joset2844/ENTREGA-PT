@@ -1,5 +1,11 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { deleteApp, initializeApp } from 'firebase/app';
+import {
+  createUserWithEmailAndPassword,
+  getAuth,
+  GoogleAuthProvider,
+  sendEmailVerification,
+  signOut,
+} from 'firebase/auth';
 import {
   doc,
   Firestore,
@@ -35,6 +41,26 @@ export const db = firestoreInstance;
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+export async function createTeamUserAccount(
+  email: string,
+  password: string
+): Promise<void> {
+  const secAppName = `team_user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const secApp = initializeApp(firebaseConfig, secAppName);
+  const secAuth = getAuth(secApp);
+  try {
+    const cred = await createUserWithEmailAndPassword(secAuth, email.trim(), password);
+    try {
+      await sendEmailVerification(cred.user);
+    } catch {
+      // Verification email error is non-fatal; user can request resend on login
+    }
+    await signOut(secAuth);
+  } finally {
+    await deleteApp(secApp).catch(() => {});
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',
