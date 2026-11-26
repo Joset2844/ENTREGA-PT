@@ -14,10 +14,10 @@ import {
   sanitizarStockDuplicados,
 } from '../utils/helpers';
 import { descargarXml, xmlEntregas } from '../services/excel';
-import { encolarDel } from '../services/sheets';
 import { EditarStockModal } from './EditarStockModal';
 import { EditarPlantaModal } from './EditarPlantaModal';
 import { EntregasOpModal } from './EntregasOpModal';
+import { EditarEntradaModal } from './EditarEntradaModal';
 
 interface RegistrosTabProps {
   registros: Registro[];
@@ -27,10 +27,16 @@ interface RegistrosTabProps {
   planesOp: Record<string, PlanOp>;
   opExtra?: Record<string, OpExtra>;
   onUpdateOpExtra?: (op: string, fdesp: string, changes: Partial<OpExtra>) => void;
-  onEnviarSheets: () => void;
-  onTraerSheets: () => void;
   onBorrarRemoto: (id: string) => void;
   onToast: (t: 'ok' | 'error', m: string) => void;
+}
+
+function offsetFechaIso(delta: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + delta);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
 }
 
 export const RegistrosTab: React.FC<RegistrosTabProps> = ({
@@ -41,8 +47,6 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
   planesOp,
   opExtra = {},
   onUpdateOpExtra,
-  onEnviarSheets,
-  onTraerSheets,
   onBorrarRemoto,
   onToast,
 }) => {
@@ -127,6 +131,60 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
     stock: number;
   } | null>(null);
 
+  const [editingReg, setEditingReg] = useState<Registro | null>(null);
+
+  const handleGuardarEdicionReg = (updated: Registro) => {
+    const oldReg = registros.find((x) => x.id === updated.id);
+    let nextRegs = registros.map((x) => (x.id === updated.id ? { ...updated, sync: false } : x));
+    const toSend: Registro[] = [updated];
+
+    if (oldReg && oldReg.pedido !== updated.pedido && updated.pedido > 0) {
+      nextRegs = nextRegs.map((x) => {
+        if (
+          x.id !== updated.id &&
+          x.op.trim().toLowerCase() === updated.op.trim().toLowerCase() &&
+          (x.fdesp || x.fecha) === (updated.fdesp || updated.fecha) &&
+          x.pedido !== updated.pedido
+        ) {
+          const changed = { ...x, pedido: updated.pedido, sync: false };
+          toSend.push(changed);
+          return changed;
+        }
+        return x;
+      });
+    }
+
+    const camb = recalcularEstados(
+      updated.op,
+      updated.fdesp || updated.fecha,
+      nextRegs,
+      planesOp,
+      opExtra
+    );
+    camb.forEach((c) => {
+      if (!toSend.some((t) => t.id === c.id)) toSend.push(c);
+    });
+
+    if (
+      oldReg &&
+      (oldReg.fdesp || oldReg.fecha) !== (updated.fdesp || updated.fecha)
+    ) {
+      recalcularEstados(
+        oldReg.op,
+        oldReg.fdesp || oldReg.fecha,
+        nextRegs,
+        planesOp,
+        opExtra
+      ).forEach((c) => {
+        if (!toSend.some((t) => t.id === c.id)) toSend.push(c);
+      });
+    }
+
+    onRegistrosChange(nextRegs, toSend);
+    setEditingReg(null);
+    onToast('ok', `Registro de OP ${updated.op} actualizado (${updated.total} u)`);
+  };
+
   const handleToggleEnProduccion = (op: string, fdesp: string, checked: boolean) => {
     if (onUpdateOpExtra) {
       onUpdateOpExtra(op, fdesp, { enProduccion: checked });
@@ -192,7 +250,6 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
         updatedRegs = updatedRegs.filter((x) => !stockRecs.some((s) => s.id === x.id));
         stockRecs.forEach((s) => {
           onBorrarRemoto(s.id);
-          encolarDel(s.id, 'registros');
         });
       }
 
@@ -202,7 +259,6 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
         updatedRegs = updatedRegs.filter((x) => !dups.some((d) => d.id === x.id));
         dups.forEach((d) => {
           onBorrarRemoto(d.id);
-          encolarDel(d.id, 'registros');
         });
       }
     } else if (newStock > 0) {
@@ -239,7 +295,6 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
     const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(updatedRegs);
     duplicadosEliminados.forEach((d) => {
       onBorrarRemoto(d.id);
-      encolarDel(d.id, 'registros');
     });
     updatedRegs = registrosLimpios;
 
@@ -261,7 +316,6 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
     }
     duplicadosEliminados.forEach((d) => {
       onBorrarRemoto(d.id);
-      encolarDel(d.id, 'registros');
     });
     onRegistrosChange(registrosLimpios);
     onToast(
@@ -281,7 +335,6 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
     const remaining = registros.filter((x) => x.id !== r.id);
     const cb = recalcularEstados(r.op, r.fdesp || r.fecha, remaining, planesOp, opExtra);
     onBorrarRemoto(r.id);
-    encolarDel(r.id, 'registros');
     onRegistrosChange(remaining, cb);
     onToast('ok', `Registro de OP ${r.op} (${r.total || 0} u) eliminado`);
   };
@@ -302,7 +355,6 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
     }
     toDelete.forEach((r) => {
       onBorrarRemoto(r.id);
-      encolarDel(r.id, 'registros');
     });
     const toDeleteIds = new Set(toDelete.map((x) => x.id));
     const remaining = registros.filter((x) => !toDeleteIds.has(x.id));
@@ -565,17 +617,25 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
 
       {/* Actions Toolbar */}
       <div className="tools">
+        <button
+          className={`btn-s ${fDesp === hoy() ? 'btn-s-active' : ''}`}
+          type="button"
+          onClick={() => setFDesp(fDesp === hoy() ? '' : hoy())}
+        >
+          Despacho hoy
+        </button>
+        <button
+          className={`btn-s ${fFecha === offsetFechaIso(-1) ? 'btn-s-active' : ''}`}
+          type="button"
+          onClick={() => setFFecha(fFecha === offsetFechaIso(-1) ? '' : offsetFechaIso(-1))}
+        >
+          Reg. ayer
+        </button>
         <button className="btn-s" id="exp" type="button" onClick={handleExportExcel}>
           Excel
         </button>
         <button className="btn-s" id="imp" type="button" onClick={handleAbrirImprimir}>
           Imprimir
-        </button>
-        <button className="btn-s" id="envSb" type="button" onClick={onEnviarSheets}>
-          Enviar a Sheets
-        </button>
-        <button className="btn-s" id="traeSb" type="button" onClick={onTraerSheets}>
-          Traer de Sheets
         </button>
         <button
           className="btn-s"
@@ -584,7 +644,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
           onClick={handleDepurarStock}
           title="Detecta, consolida y elimina stock inicial duplicado"
         >
-          🧹 Depurar stock
+          Depurar stock
         </button>
         <button
           className="btn-s"
@@ -687,7 +747,7 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                           {r.sync ? '☁️' : '⏳'}
                         </td>
                         <td className="actions">
-                          {isStk && (
+                          {isStk ? (
                             <button
                               className="stock-btn"
                               type="button"
@@ -701,7 +761,16 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
                                 })
                               }
                             >
-                              ✏️ Stock
+                              Editar stock
+                            </button>
+                          ) : (
+                            <button
+                              className="stock-btn"
+                              type="button"
+                              title="Editar entrega"
+                              onClick={() => setEditingReg(r)}
+                            >
+                              Editar
                             </button>
                           )}
                           <button
@@ -1512,6 +1581,16 @@ export const RegistrosTab: React.FC<RegistrosTabProps> = ({
           onDeleteRegistro={handleBorrar}
           onDeleteAllForOp={() => handleBorrarTodasOp(entregasModalOp.op, entregasModalOp.fdesp)}
           onClose={() => setEntregasModalOp(null)}
+        />
+      )}
+
+      {editingReg && (
+        <EditarEntradaModal
+          tipo="registro"
+          item={editingReg}
+          nombres={nombres}
+          onClose={() => setEditingReg(null)}
+          onSave={handleGuardarEdicionReg}
         />
       )}
     </div>

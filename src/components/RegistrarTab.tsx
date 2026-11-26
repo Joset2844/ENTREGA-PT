@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import {
   CatalogoOp,
   GridRow,
+  Ingreso,
   PlanDespacho,
   PlanOp,
   Registro,
@@ -32,6 +33,7 @@ import {
   sanitizarStockDuplicados,
   sapsDeCatalogoOp,
   stockDe,
+  ultimoEmpaqueOp,
   ultimoPedido,
   agrupar,
 } from '../utils/helpers';
@@ -43,7 +45,6 @@ import {
   buscarSap,
   valStock,
 } from '../services/excel';
-import { encolarDel } from '../services/sheets';
 import { ConfirmarListaModal } from './ConfirmarListaModal';
 import { EditarStockModal } from './EditarStockModal';
 import { EditarPlantaModal } from './EditarPlantaModal';
@@ -60,6 +61,7 @@ interface RegistrarTabProps {
   nombre: string;
   turno: string;
   registros: Registro[];
+  ingresos?: Ingreso[];
   onRegistrosChange: (newRegs: Registro[], toSend?: Registro[]) => void;
   catalogo: CatalogoOp[];
   catLoading?: boolean;
@@ -74,6 +76,7 @@ interface RegistrarTabProps {
   opExtra: Record<string, OpExtra>;
   onUpdateOpExtra: (op: string, fdesp: string, changes: Partial<OpExtra>) => void;
   onBorrarRemoto?: (id: string) => void;
+  prefillOp?: { op: string; fdesp?: string; nonce: number } | null;
   onToast: (t: 'ok' | 'error', m: string) => void;
 }
 
@@ -84,6 +87,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   nombre,
   turno,
   registros,
+  ingresos = [],
   onRegistrosChange,
   catalogo,
   catLoading,
@@ -98,6 +102,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
   opExtra,
   onUpdateOpExtra,
   onBorrarRemoto,
+  prefillOp,
   onToast,
 }) => {
   // Form State
@@ -260,7 +265,6 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     }
     const remaining = registros.filter((x) => x.id !== r.id);
     const cb = recalcularEstados(r.op, r.fdesp || r.fecha, remaining, planesOp, opExtra);
-    encolarDel(r.id, 'registros');
     if (onBorrarRemoto) onBorrarRemoto(r.id);
     onRegistrosChange(remaining, cb);
     onToast('ok', `Entrega de OP ${r.op} (${r.total || 0} u) eliminada`);
@@ -281,7 +285,6 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       return;
     }
     toDelete.forEach((r) => {
-      encolarDel(r.id, 'registros');
       if (onBorrarRemoto) onBorrarRemoto(r.id);
     });
     const toDeleteIds = new Set(toDelete.map((x) => x.id));
@@ -353,14 +356,14 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
       } else {
         // newStock is 0: remove all stock records for this OP in this despacho
         updatedRegs = updatedRegs.filter((x) => !stockRecs.some((s) => s.id === x.id));
-        stockRecs.forEach((s) => encolarDel(s.id, 'registros'));
+        stockRecs.forEach((s) => onBorrarRemoto?.(s.id));
       }
 
       // If duplicate stock records were present, delete them permanently
       if (stockRecs.length > 1) {
         const dups = stockRecs.slice(1);
         updatedRegs = updatedRegs.filter((x) => !dups.some((d) => d.id === x.id));
-        dups.forEach((d) => encolarDel(d.id, 'registros'));
+        dups.forEach((d) => onBorrarRemoto?.(d.id));
       }
     } else if (newStock > 0) {
       const ref = updatedRegs.find(
@@ -396,7 +399,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
 
     // Safety sanitizer
     const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(updatedRegs);
-    duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
+    duplicadosEliminados.forEach((d) => onBorrarRemoto?.(d.id));
     updatedRegs = registrosLimpios;
 
     const camb = recalcularEstados(op, modalFd, updatedRegs, planesOp);
@@ -508,7 +511,69 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
     const ped = pedidoDe(m.op, fdesp, registros, catalogo, planesOp, planes, selSap);
     if (ped) setFormPedido(String(ped));
     else setFormPedido('');
+
+    const mem = ultimoEmpaqueOp(m.op, registros, ingresos, selSap);
+    if (mem) {
+      setFormEmp(mem.empaque);
+      if (!formU) setFormU(String(mem.u));
+    }
   };
+
+  useEffect(() => {
+    if (!prefillOp || !prefillOp.op) return;
+    if (prefillOp.fdesp && prefillOp.fdesp !== fdesp) {
+      onFdespChange(prefillOp.fdesp);
+    }
+    const m = findCatalogoOp(catalogo, prefillOp.op);
+    if (modoReg === 'form') {
+      if (m) {
+        aplicarOpForm(m);
+      } else {
+        setFormOp(prefillOp.op);
+      }
+    } else {
+      const targetOp = m ? m.op : prefillOp.op;
+      const mem = ultimoEmpaqueOp(targetOp, registros, ingresos);
+      let mod = 'all';
+      if (m && m.modelos && m.modelos.length > 1) {
+        const matchingIdxs = m.modelos
+          .map((mo, idx) => ({
+            idx,
+            match: mo.sap
+              ? compararSapConDespacho(mo.sap, prefillOp.fdesp || fdesp, registros, planes, m.op)?.enDespacho
+              : false,
+          }))
+          .filter((x) => x.match)
+          .map((x) => x.idx);
+        if (matchingIdxs.length === 1) mod = String(matchingIdxs[0]);
+      }
+      setGrid((prev) => {
+        const already = prev.some(
+          (r) => r.op.trim().toLowerCase() === targetOp.trim().toLowerCase()
+        );
+        if (already) return prev;
+        const next = [...prev];
+        const emptyIdx = next.findIndex((r) => !r.op.trim() && !r.u && !r.c);
+        const newRow: GridRow = {
+          op: targetOp,
+          mod,
+          pedido: '',
+          emp: mem?.empaque || 'caja',
+          u: mem ? String(mem.u) : '',
+          c: '',
+        };
+        if (emptyIdx >= 0) next[emptyIdx] = newRow;
+        else next.push(newRow);
+        const last = next[next.length - 1];
+        if (!last || last.op || last.u || last.c) {
+          next.push({ op: '', mod: 'all', pedido: '', emp: 'caja', u: '', c: '' });
+        }
+        saveGridDraft(next);
+        return next;
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillOp?.nonce]);
 
   const handleSelectModeloForm = (idx: number, m: CatalogoOp) => {
     setFormModeloSel(idx);
@@ -1108,7 +1173,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
         if (existingStockRecs.length > 1) {
           const dups = existingStockRecs.slice(1);
           workingRegs = workingRegs.filter((x) => !dups.some((d) => d.id === x.id));
-          dups.forEach((d) => encolarDel(d.id, 'registros'));
+          dups.forEach((d) => onBorrarRemoto?.(d.id));
         }
       } else {
         // Check if there is an empty placeholder card without deliveries that can hold the stock
@@ -1177,7 +1242,7 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
 
     // Sanitizer guarantees 0 stock duplicates
     const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(combinedRegs);
-    duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
+    duplicadosEliminados.forEach((d) => onBorrarRemoto?.(d.id));
     combinedRegs = registrosLimpios;
 
     // Recalculate status for all affected OPs
@@ -1391,6 +1456,11 @@ export const RegistrarTab: React.FC<RegistrarTabProps> = ({
         updated[i].mod = matchingIdxs.length === 1 ? String(matchingIdxs[0]) : 'all';
       } else {
         updated[i].mod = 'all';
+      }
+      const mem = ultimoEmpaqueOp(m ? m.op : val, registros, ingresos);
+      if (mem) {
+        updated[i].emp = mem.empaque;
+        if (!updated[i].u) updated[i].u = String(mem.u);
       }
     }
 

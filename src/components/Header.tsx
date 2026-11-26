@@ -1,10 +1,14 @@
 import React from 'react';
 
+export type AppTab = 'dash' | 'reg' | 'lista' | 'ing' | 'cfg';
+
 interface HeaderProps {
-  activeTab: 'reg' | 'lista' | 'ing' | 'cfg';
-  onTabChange: (tab: 'reg' | 'lista' | 'ing' | 'cfg') => void;
+  activeTab: AppTab;
+  onTabChange: (tab: AppTab) => void;
   canInstall: boolean;
   onInstall: () => void;
+  userEmail: string;
+  onSignOut: () => void;
   // Reg context
   fecha: string;
   onFechaChange: (v: string) => void;
@@ -27,6 +31,8 @@ export const Header: React.FC<HeaderProps> = ({
   onTabChange,
   canInstall,
   onInstall,
+  userEmail,
+  onSignOut,
   fecha,
   onFechaChange,
   nombre,
@@ -41,6 +47,8 @@ export const Header: React.FC<HeaderProps> = ({
   onITurnoChange,
   nombres,
 }) => {
+  const shortUser = userEmail ? userEmail.split('@')[0] : '';
+
   return (
     <header className="top">
       <div className="wrap bar">
@@ -54,6 +62,13 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <nav className="tabs" id="tabs" aria-label="Secciones">
+          <button
+            className={`tab ${activeTab === 'dash' ? 'active' : ''}`}
+            type="button"
+            onClick={() => onTabChange('dash')}
+          >
+            Tablero
+          </button>
           <button
             className={`tab ${activeTab === 'reg' ? 'active' : ''}`}
             type="button"
@@ -83,6 +98,22 @@ export const Header: React.FC<HeaderProps> = ({
             Config
           </button>
         </nav>
+
+        <div className="user-bar">
+          {shortUser && (
+            <span className="user-id" title={userEmail}>
+              {shortUser}
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn-s"
+            style={{ minHeight: '34px', padding: '4px 10px', fontSize: '0.8rem' }}
+            onClick={onSignOut}
+          >
+            Salir
+          </button>
+        </div>
 
         {(activeTab === 'reg' || activeTab === 'ing') && (
           <div className="ctx" id="ctx">

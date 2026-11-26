@@ -1106,3 +1106,56 @@ export function resumenSapsDespacho(
     };
   });
 }
+
+export function ultimoEmpaqueOp(
+  op: string,
+  registros: Registro[],
+  ingresos: { op: string; sap?: string; empaque: string; u: number; creado: string }[] = [],
+  sap?: string
+): { empaque: 'caja' | 'paquete'; u: number } | null {
+  const opNorm = (op || '').trim().toLowerCase();
+  const saps = extraerSaps(sap);
+  if (!opNorm && !saps.length) return null;
+
+  const candidates: { empaque: string; u: number; creado: string; score: number }[] = [];
+
+  registros.forEach((r) => {
+    if (esStock(r) || !(r.u > 0)) return;
+    const sameOp = opNorm && r.op.trim().toLowerCase() === opNorm;
+    const sameSap = saps.length > 0 && extraerSaps(r.sap).some((s) => saps.includes(s));
+    if (sameOp || sameSap) {
+      candidates.push({
+        empaque: r.empaque === 'paquete' ? 'paquete' : 'caja',
+        u: r.u,
+        creado: r.creado || '',
+        score: sameOp ? 2 : 1,
+      });
+    }
+  });
+
+  ingresos.forEach((r) => {
+    if (!(r.u > 0)) return;
+    const sameOp = opNorm && r.op.trim().toLowerCase() === opNorm;
+    const sameSap = saps.length > 0 && extraerSaps(r.sap).some((s) => saps.includes(s));
+    if (sameOp || sameSap) {
+      candidates.push({
+        empaque: r.empaque === 'paquete' ? 'paquete' : 'caja',
+        u: r.u,
+        creado: r.creado || '',
+        score: sameOp ? 2 : 1,
+      });
+    }
+  });
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return String(b.creado).localeCompare(String(a.creado));
+  });
+
+  return {
+    empaque: candidates[0].empaque === 'paquete' ? 'paquete' : 'caja',
+    u: candidates[0].u,
+  };
+}
+

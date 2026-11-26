@@ -5,7 +5,7 @@ import { catTs, leerCatalogoSb, normOpSb } from '../services/supabase';
 import { K_CAT, K_CATTS, K_RES, ld, sv } from '../services/storage';
 import { archivoOk } from '../services/excel';
 import { hoy, norm, sanitizarStockDuplicados } from '../utils/helpers';
-import { encolarDel, validoRec } from '../services/sheets';
+import { validoRec } from '../services/firestoreSync';
 import { QrEtiquetasModal } from './QrEtiquetasModal';
 
 interface ConfigTabProps {
@@ -14,11 +14,20 @@ interface ConfigTabProps {
   catalogo: CatalogoOp[];
   onCatalogoChange: (newCat: CatalogoOp[]) => void;
   registros: Registro[];
-  onRegistrosChange: (newRegs: Registro[]) => void;
+  onRegistrosChange: (newRegs: Registro[], toSend?: Registro[]) => void;
   ingresos: Ingreso[];
-  onIngresosChange: (newIngs: Ingreso[]) => void;
+  onIngresosChange: (newIngs: Ingreso[], toSend?: Ingreso[]) => void;
   catErr: string;
   onCatErrChange: (err: string) => void;
+  userEmail: string;
+  canManageTeam: boolean;
+  teamEmails: string[];
+  onTeamEmailsChange: (emails: string[]) => Promise<void>;
+  legacyPending: { registros: number; ingresos: number; planes: number; extras: number };
+  migrating: boolean;
+  onMigrateLocal: () => Promise<void>;
+  onBorrarRemoto: (id: string) => void;
+  onSignOut: () => void;
   onToast: (t: 'ok' | 'error', m: string) => void;
 }
 
@@ -33,9 +42,20 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
   onIngresosChange,
   catErr,
   onCatErrChange,
+  userEmail,
+  canManageTeam,
+  teamEmails,
+  onTeamEmailsChange,
+  legacyPending,
+  migrating,
+  onMigrateLocal,
+  onBorrarRemoto,
+  onSignOut,
   onToast,
 }) => {
   const [nombresTxt, setNombresTxt] = useState('');
+  const [newEmailTxt, setNewEmailTxt] = useState('');
+  const [savingTeam, setSavingTeam] = useState(false);
   const [pwaItems, setPwaItems] = useState<{ ok: boolean | null; text: string }[]>([]);
   const [ultimoRespaldo, setUltimoRespaldo] = useState<string | null>(() =>
     ld<string | null>(K_RES, null)
@@ -167,6 +187,45 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
   const handleRemoveNombre = (n: string) => {
     const updated = nombres.filter((x) => x !== n);
     onNombresChange(updated);
+  };
+
+  // Team Gmail permissions
+  const handleAddTeamEmail = async () => {
+    const candidate = newEmailTxt.trim().toLowerCase();
+    if (!candidate || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate)) {
+      onToast('error', 'Ingresa un correo Google válido');
+      return;
+    }
+    if (teamEmails.includes(candidate)) {
+      onToast('error', 'Ese correo ya está en la lista');
+      return;
+    }
+    if (teamEmails.length >= 15) {
+      onToast('error', 'Máximo 15 correos autorizados en el equipo');
+      return;
+    }
+    setSavingTeam(true);
+    try {
+      await onTeamEmailsChange([...teamEmails, candidate]);
+      setNewEmailTxt('');
+      onToast('ok', `${candidate} agregado al equipo compartido`);
+    } finally {
+      setSavingTeam(false);
+    }
+  };
+
+  const handleRemoveTeamEmail = async (emailToRemove: string) => {
+    if (emailToRemove.toLowerCase() === userEmail.toLowerCase()) {
+      onToast('error', 'No puedes quitar tu propio correo de administrador');
+      return;
+    }
+    setSavingTeam(true);
+    try {
+      await onTeamEmailsChange(teamEmails.filter((e) => e !== emailToRemove));
+      onToast('ok', `${emailToRemove} retirado del equipo`);
+    } finally {
+      setSavingTeam(false);
+    }
   };
 
   // Supabase update
@@ -363,7 +422,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
   // Download Backup
   const handleDescargarRespaldo = () => {
     const o = {
-      version: 1,
+      version: 2,
       fecha: new Date().toISOString(),
       registros,
       ingresos,
@@ -389,7 +448,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
     }
   };
 
-  // Restore Backup
+  // Restore Backup -> also uploads new records to Firestore!
   const handleRestaurarRespaldo = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = '';
@@ -442,7 +501,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
 
       if (
         !window.confirm(
-          `Respaldo del ${String(o.fecha || '').slice(0, 10)}:\n• ${nR.length} registro(s) y ${nI.length} ingreso(s) que no existen aquí se agregarán\n• ${(R.ok.length - nR.length) + (I.ok.length - nI.length)} ya existen y no se tocan${mal ? `\n• ${mal} con datos incompletos se omiten` : ''}\n\n¿Restaurar?`
+          `Respaldo del ${String(o.fecha || '').slice(0, 10)}:\n• ${nR.length} registro(s) y ${nI.length} ingreso(s) que no existen aquí se agregarán y subirán a la nube\n• ${(R.ok.length - nR.length) + (I.ok.length - nI.length)} ya existen y no se tocan${mal ? `\n• ${mal} con datos incompletos se omiten` : ''}\n\n¿Restaurar?`
         )
       ) {
         return;
@@ -469,16 +528,138 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
       newNombres.sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
 
       onNombresChange(newNombres);
-      onRegistrosChange(newCombinedRegs);
-      onIngresosChange(newCombinedIngs);
+      onRegistrosChange(newCombinedRegs, nR);
+      onIngresosChange(newCombinedIngs, nI);
 
-      onToast('ok', `Restaurado: ${nR.length} registro(s) y ${nI.length} ingreso(s)`);
+      onToast('ok', `Restaurado y subiendo a Firebase: ${nR.length} registro(s) y ${nI.length} ingreso(s)`);
     };
     rd.readAsText(f);
   };
 
+  const totalLegacyPend =
+    legacyPending.registros +
+    legacyPending.ingresos +
+    legacyPending.planes +
+    legacyPending.extras;
+
   return (
     <div id="t-cfg">
+      {/* Nube Firebase & Equipo */}
+      <div className="panel">
+        <div className="sec">Nube Firebase y cuenta</div>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '8px',
+            flexWrap: 'wrap',
+            marginBottom: '12px',
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>{userEmail}</div>
+            <div className="info" style={{ fontSize: '0.78rem' }}>
+              Sincronización en tiempo real en Firestore (sin Google Sheets)
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-s"
+            onClick={onSignOut}
+          >
+            Cerrar sesión
+          </button>
+        </div>
+
+        <div
+          style={{
+            padding: '10px 12px',
+            borderRadius: '10px',
+            border: `1px solid ${totalLegacyPend > 0 ? 'var(--amber)' : 'var(--border)'}`,
+            background: totalLegacyPend > 0 ? 'var(--amber-soft)' : 'var(--alt)',
+            marginBottom: '14px',
+          }}
+        >
+          <div style={{ fontWeight: 700, fontSize: '0.86rem', marginBottom: '4px' }}>
+            Migración de datos locales a la nube
+          </div>
+          <div className="info" style={{ fontSize: '0.8rem', marginBottom: totalLegacyPend > 0 ? '8px' : 0 }}>
+            {totalLegacyPend > 0
+              ? `Hay ${legacyPending.registros} registro(s), ${legacyPending.ingresos} ingreso(s), ${legacyPending.planes} lista(s) y ${legacyPending.extras} estado(s) locales sin subir.`
+              : 'Todos los datos locales detectados en este equipo ya están en la nube.'}
+          </div>
+          {totalLegacyPend > 0 && (
+            <button
+              type="button"
+              className="btn"
+              disabled={migrating}
+              style={{ minHeight: '38px', padding: '6px 12px', fontSize: '0.86rem' }}
+              onClick={onMigrateLocal}
+            >
+              {migrating ? 'Migrando a Firebase...' : 'Migrar datos locales a Firestore ahora'}
+            </button>
+          )}
+        </div>
+
+        <div style={{ fontWeight: 700, fontSize: '0.86rem', marginBottom: '6px' }}>
+          Equipo autorizado ({teamEmails.length}/15)
+        </div>
+        <p className="info" style={{ margin: '0 0 8px', fontSize: '0.78rem' }}>
+          Agrega los correos Google de tus compañeros de planta o almacén para que compartan exactamente los mismos registros en tiempo real.
+        </p>
+
+        {canManageTeam && (
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+            <input
+              type="email"
+              placeholder="correo.companero@gmail.com"
+              value={newEmailTxt}
+              onChange={(e) => setNewEmailTxt(e.target.value)}
+            />
+            <button
+              type="button"
+              className="btn-s"
+              disabled={savingTeam}
+              style={{ whiteSpace: 'nowrap', borderColor: 'var(--amber)', fontWeight: 700 }}
+              onClick={handleAddTeamEmail}
+            >
+              {savingTeam ? '...' : '+ Autorizar'}
+            </button>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {teamEmails.map((em) => (
+            <div
+              key={em}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '7px 10px',
+                borderRadius: '8px',
+                border: '1px solid var(--border)',
+                background: 'var(--field)',
+                fontSize: '0.84rem',
+              }}
+            >
+              <span className="mono">{em}</span>
+              {canManageTeam && em.toLowerCase() !== userEmail.toLowerCase() && (
+                <button
+                  type="button"
+                  className="del"
+                  disabled={savingTeam}
+                  onClick={() => handleRemoveTeamEmail(em)}
+                >
+                  Quitar
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Habilitadores panel */}
       <div className="panel">
         <div className="sec">Habilitadores</div>
@@ -528,27 +709,6 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
         </div>
       </div>
 
-      {/* PWA Panel */}
-      <div className="panel">
-        <div className="sec">Instalación de la app (PWA)</div>
-        <div id="pwaDiag" style={{ fontSize: '0.85rem', color: 'var(--muted2)', lineHeight: 1.4 }}>
-          {pwaItems.map((it, idx) => (
-            <div key={idx} style={{ margin: '3px 0' }}>
-              {it.ok === null ? 'ℹ️' : it.ok ? '✅' : '❌'} {it.text}
-            </div>
-          ))}
-        </div>
-        <button
-          className="btn-s"
-          id="pwaRevisar"
-          type="button"
-          style={{ marginTop: '8px' }}
-          onClick={runPwaDiag}
-        >
-          Revisar de nuevo
-        </button>
-      </div>
-
       {/* Catálogo de OP */}
       <div className="panel">
         <div className="sec">Catálogo de OP</div>
@@ -562,7 +722,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
                 minute: '2-digit',
               })}`
             : ''}
-          {catErr ? ` · ⚠️ ${catErr}` : ''}
+          {catErr ? ` · ${catErr}` : ''}
         </p>
         <div className="tools">
           <button
@@ -588,7 +748,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
             onClick={() => setShowQrEtiquetas(true)}
             style={{ borderColor: 'var(--amber)', fontWeight: 700 }}
           >
-            🏷️ Etiquetas QR (zDesign)
+            Etiquetas QR (zDesign)
           </button>
           <input
             type="file"
@@ -599,18 +759,15 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
           />
         </div>
         <p className="info" style={{ margin: 0, fontSize: '0.78rem' }}>
-          El catálogo se lee de la tabla <b>catalogo_op</b> de Supabase (la misma de las otras apps)
-          y se actualiza solo cada 4 horas al abrir la app. Si cargaron OP nuevas, toca «Actualizar».
-          «Importar Excel» solo sirve en este equipo y se reemplaza al actualizar.
+          El catálogo se lee de la tabla <b>catalogo_op</b> de Supabase y se guarda en caché local (IndexedDB) para funcionar incluso sin internet.
         </p>
       </div>
 
       {/* Respaldo de datos */}
       <div className="panel">
-        <div className="sec">Respaldo de datos</div>
+        <div className="sec">Respaldo de datos (JSON)</div>
         <p className="info" style={{ margin: '0 0 10px' }}>
-          Descarga una copia de tus registros e ingresos. Al restaurar solo se agregan los que no
-          existen; nunca se borra ni se pisa nada.
+          Descarga una copia local de seguridad en JSON. Al restaurar un archivo JSON solo se agregan los registros que faltan y se sincronizan automáticamente con Firebase.
         </p>
         <div className="tools">
           <button
@@ -648,7 +805,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
       <div className="panel">
         <div className="sec">Mantenimiento de stock inicial</div>
         <p className="info" style={{ margin: '0 0 10px' }}>
-          Analiza y consolida el stock inicial de todas las OPs en sus despachos correspondientes, eliminando entradas duplicadas residuales tanto en la memoria local como en Google Sheets.
+          Analiza y consolida el stock inicial de todas las OPs en sus despachos correspondientes, eliminando entradas duplicadas tanto en la memoria local como en Firebase Firestore.
         </p>
         <div className="tools">
           <button
@@ -660,7 +817,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
                 onToast('ok', 'Excelente: no se detectaron duplicados de stock inicial');
                 return;
               }
-              duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
+              duplicadosEliminados.forEach((d) => onBorrarRemoto(d.id));
               onRegistrosChange(registrosLimpios);
               onToast(
                 'ok',
@@ -668,9 +825,30 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
               );
             }}
           >
-            🧹 Depurar stock duplicado
+            Depurar stock duplicado
           </button>
         </div>
+      </div>
+
+      {/* PWA Panel */}
+      <div className="panel">
+        <div className="sec">Instalación de la app (PWA)</div>
+        <div id="pwaDiag" style={{ fontSize: '0.85rem', color: 'var(--muted2)', lineHeight: 1.4 }}>
+          {pwaItems.map((it, idx) => (
+            <div key={idx} style={{ margin: '3px 0' }}>
+              {it.ok === null ? 'ℹ️' : it.ok ? '✅' : '❌'} {it.text}
+            </div>
+          ))}
+        </div>
+        <button
+          className="btn-s"
+          id="pwaRevisar"
+          type="button"
+          style={{ marginTop: '8px' }}
+          onClick={runPwaDiag}
+        >
+          Revisar de nuevo
+        </button>
       </div>
 
       {showQrEtiquetas && (
