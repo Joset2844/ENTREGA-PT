@@ -5,6 +5,7 @@ interface SyncBadgeProps {
   isOnline: boolean;
   syncOk: boolean;
   pendingCount: number;
+  onSyncNow: () => void;
 }
 
 export const SyncBadge: React.FC<SyncBadgeProps> = ({
@@ -12,34 +13,32 @@ export const SyncBadge: React.FC<SyncBadgeProps> = ({
   isOnline,
   syncOk,
   pendingCount,
+  onSyncNow,
 }) => {
   const timeStr = lastSyncTime
     ? `${('0' + lastSyncTime.getHours()).slice(-2)}:${('0' + lastSyncTime.getMinutes()).slice(-2)}:${('0' + lastSyncTime.getSeconds()).slice(-2)}`
     : '--:--:--';
 
-  const statusText = !isOnline
-    ? 'Sin internet (modo local) '
-    : !syncOk
-    ? 'Reconectando nube '
-    : pendingCount > 0
-    ? 'Sincronizando nube '
-    : 'Nube conectada ';
-  const pendTxt = pendingCount > 0 ? ` · ${pendingCount} por subir` : '';
+  const statusText = !isOnline || !syncOk ? 'Sin conexión con Sheets ' : 'Sincronizado ';
+  const pendTxt = pendingCount > 0 ? ` · ${pendingCount} sin enviar` : '';
 
   return (
     <div
       id="syncMarca"
       style={{
         position: 'fixed',
-        right: '10px',
-        bottom: '10px',
-        font: '600 12px "IBM Plex Mono", monospace',
-        padding: '5px 10px',
-        borderRadius: '8px',
-        background: !isOnline ? 'rgba(180,35,35,0.9)' : 'rgba(27,36,51,0.84)',
+        right: '8px',
+        bottom: '8px',
+        font: '12px sans-serif',
+        padding: '4px 8px',
+        borderRadius: '12px',
+        background: 'rgba(0,0,0,.65)',
         color: '#fff',
         zIndex: 9999,
+        cursor: 'pointer',
       }}
+      title="Tocar para sincronizar ahora"
+      onClick={onSyncNow}
     >
       {statusText}
       {timeStr}

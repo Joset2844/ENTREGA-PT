@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CatalogoOp, Ingreso, IngresoGridRow, Registro } from '../types';
+import { CatalogoOp, Ingreso, IngresoGridRow } from '../types';
 import {
   avisoCant,
   avisoFecha,
@@ -9,20 +9,16 @@ import {
   findCatalogoOp,
   hoy,
   normOpLookup,
-  ultimoEmpaqueOp,
 } from '../utils/helpers';
 import { K_IGRID, ld, sv } from '../services/storage';
 import { descargarXml, xmlIngresos } from '../services/excel';
-import { QrScannerModal } from './QrScannerModal';
-import { QrParsedResult } from '../utils/qr';
-import { EditarEntradaModal } from './EditarEntradaModal';
+import { encolarDel } from '../services/sheets';
 
 interface IngresosTabProps {
   iFecha: string;
   iNombre: string;
   iTurno: string;
   ingresos: Ingreso[];
-  registros?: Registro[];
   onIngresosChange: (newIngs: Ingreso[], toSend?: Ingreso[]) => void;
   catalogo: CatalogoOp[];
   catLoading?: boolean;
@@ -31,16 +27,10 @@ interface IngresosTabProps {
   nombres: string[];
   modoIng: 'tabla' | 'form';
   onModoIngChange: (m: 'tabla' | 'form') => void;
+  onEnviarSheets: () => void;
+  onTraerSheets: () => void;
   onBorrarRemoto: (id: string) => void;
   onToast: (t: 'ok' | 'error', m: string) => void;
-}
-
-function offsetFechaIso(delta: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + delta);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-    d.getDate()
-  ).padStart(2, '0')}`;
 }
 
 export const IngresosTab: React.FC<IngresosTabProps> = ({
@@ -48,7 +38,6 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
   iNombre,
   iTurno,
   ingresos,
-  registros = [],
   onIngresosChange,
   catalogo,
   catLoading,
@@ -57,6 +46,8 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
   nombres,
   modoIng,
   onModoIngChange,
+  onEnviarSheets,
+  onTraerSheets,
   onBorrarRemoto,
   onToast,
 }) => {
@@ -79,14 +70,11 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
   });
   const [igridSavePending, setIgridSavePending] = useState(false);
 
-  // Filters & View State
+  // Filters State
   const [filterFecha, setFilterFecha] = useState('');
   const [filterTurno, setFilterTurno] = useState('');
   const [filterNombre, setFilterNombre] = useState('');
   const [filterTexto, setFilterTexto] = useState('');
-  const [vistaIng, setVistaIng] = useState<'lista' | 'resumen'>('lista');
-  const [showQrScanner, setShowQrScanner] = useState(false);
-  const [editingIng, setEditingIng] = useState<Ingreso | null>(null);
 
   // Load grid draft on date change
   useEffect(() => {
@@ -111,22 +99,14 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     setFormCliente(m.cliente || '');
     setShowSug(false);
 
-    let selSap = '';
     if (m.modelos.length === 1) {
       setFormModeloSel(0);
       setFormDesc(m.modelos[0].descripcion);
-      selSap = m.modelos[0].sap || '';
-      setFormSap(selSap);
+      setFormSap(m.modelos[0].sap || '');
     } else {
       setFormModeloSel(-1);
       setFormDesc('');
       setFormSap('');
-    }
-
-    const mem = ultimoEmpaqueOp(m.op, registros, ingresos, selSap);
-    if (mem) {
-      setFormEmp(mem.empaque);
-      if (!formU) setFormU(String(mem.u));
     }
   };
 
@@ -134,65 +114,8 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     setFormModeloSel(idx);
     if (idx >= 0 && m.modelos[idx]) {
       setFormDesc(m.modelos[idx].descripcion);
-      const selSap = m.modelos[idx].sap || '';
-      setFormSap(selSap);
-      const mem = ultimoEmpaqueOp(m.op, registros, ingresos, selSap);
-      if (mem) {
-        setFormEmp(mem.empaque);
-        if (!formU) setFormU(String(mem.u));
-      }
+      setFormSap(m.modelos[idx].sap || '');
     }
-  };
-
-  const handleQrScanned = (res: QrParsedResult) => {
-    const targetOp = res.op || '';
-    const mem = ultimoEmpaqueOp(targetOp, registros, ingresos, res.sap);
-    const empVal = res.emp || mem?.empaque || 'caja';
-    const uVal = res.u > 0 ? String(res.u) : mem ? String(mem.u) : '';
-
-    if (modoIng === 'tabla') {
-      const modVal =
-        res.catMatch && res.catMatch.modelos.length > 1 && res.modeloIdx >= 0
-          ? String(res.modeloIdx)
-          : '';
-      const row: IngresoGridRow = {
-        op: targetOp,
-        mod: modVal,
-        emp: empVal,
-        u: uVal,
-        c: res.c > 0 ? String(res.c) : '',
-      };
-      const updated = [...igrid];
-      const emptyIdx = updated.findIndex((r) => !r.op.trim() && !r.u && !r.c);
-      if (emptyIdx >= 0) updated[emptyIdx] = row;
-      else updated.push(row);
-      const last = updated[updated.length - 1];
-      if (!last || last.op || last.u || last.c) {
-        updated.push({ op: '', mod: '', emp: 'caja', u: '', c: '' });
-      }
-      setIgrid(updated);
-      saveGridDraft(updated);
-    } else {
-      if (res.catMatch) {
-        aplicarOpForm(res.catMatch);
-        if (res.modeloIdx >= 0 && res.catMatch.modelos.length > 1) {
-          handleSelectModeloForm(res.modeloIdx, res.catMatch);
-        }
-      } else {
-        setOpAplicada('');
-        setFormModeloSel(-1);
-        setFormOp(targetOp);
-        setFormSap(res.sap || '');
-        setFormDesc(res.desc || '');
-        setFormCliente(res.cli || '');
-      }
-      setFormEmp(empVal);
-      if (uVal) setFormU(uVal);
-      if (res.c > 0) setFormC(String(res.c));
-    }
-
-    setShowQrScanner(false);
-    onToast('ok', `QR leído para ingreso: ${targetOp || res.sap}`);
   };
 
   const formTotalCalc = (parseInt(formU, 10) || 0) * (parseInt(formC, 10) || 0);
@@ -235,9 +158,7 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
         w.push('El catálogo de OPs aún no está cargado (0 OP en memoria)');
       } else {
         w.push(
-          `La OP ${formOp.trim()} no está en el catálogo de OP${
-            !formDesc && !formCliente ? ' y se guardará sin descripción ni cliente' : ''
-          }`
+          `La OP ${formOp.trim()} no está en el catálogo de OP${!formDesc && !formCliente ? ' y se guardará sin descripción ni cliente' : ''}`
         );
       }
     } else {
@@ -393,11 +314,6 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
         updated[i].op = m.op;
       }
       updated[i].mod = '';
-      const mem = ultimoEmpaqueOp(m ? m.op : val, registros, ingresos);
-      if (mem) {
-        updated[i].emp = mem.empaque;
-        if (!updated[i].u) updated[i].u = String(mem.u);
-      }
     }
 
     if (i === updated.length - 1 && (updated[i].op || updated[i].u || updated[i].c)) {
@@ -482,9 +398,7 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     if (avisos.length && !confirmarAvisos(avisos)) return;
     if (
       !window.confirm(
-        `Se guardarán ${okList.length} ingreso(s) al almacén del ${fcorta(iFecha)}${
-          errs ? `\n(${errs} fila(s) con errores quedan pendientes en la tabla)` : ''
-        }.\n\n¿Deseas continuar?`
+        `Se guardarán ${okList.length} ingreso(s) al almacén del ${fcorta(iFecha)}${errs ? `\n(${errs} fila(s) con errores quedan pendientes en la tabla)` : ''}.\n\n¿Deseas continuar?`
       )
     ) {
       return;
@@ -520,19 +434,12 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     onIngresosChange(newCombined, nuevos);
 
     const savedIdx = okList.map((x) => x.i);
-    const remaining = igrid.filter(
-      (_, i) => savedIdx.indexOf(i) < 0 && (igrid[i].op || igrid[i].u || igrid[i].c)
-    );
+    const remaining = igrid.filter((_, i) => savedIdx.indexOf(i) < 0 && (igrid[i].op || igrid[i].u || igrid[i].c));
     remaining.push({ op: '', mod: '', emp: 'caja', u: '', c: '' });
     setIgrid(remaining);
     saveGridDraft(remaining);
     setIgridSavePending(false);
-    onToast(
-      'ok',
-      `${nuevos.length} ingreso(s) guardado(s) exitosamente${
-        errs ? ` · ${errs} pendiente(s) por corregir` : ''
-      }`
-    );
+    onToast('ok', `${nuevos.length} ingreso(s) guardado(s) exitosamente${errs ? ` · ${errs} pendiente(s) por corregir` : ''}`);
   };
 
   // Filtered ingresos
@@ -558,44 +465,6 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
       return a.turno === 'Día' ? -1 : 1;
     });
 
-  // Grouped summary by OP for Ingresos
-  const resumenPorOp = (() => {
-    const map: Record<
-      string,
-      {
-        op: string;
-        sap: string;
-        cliente: string;
-        descripcion: string;
-        movs: number;
-        total: number;
-        ultimaFecha: string;
-      }
-    > = {};
-    const order: string[] = [];
-    filtrados.forEach((r) => {
-      const k = `${r.op.trim().toLowerCase()}|${(r.sap || '').trim().toUpperCase()}`;
-      if (!map[k]) {
-        map[k] = {
-          op: r.op,
-          sap: r.sap || '',
-          cliente: r.cliente || '',
-          descripcion: r.descripcion || '',
-          movs: 0,
-          total: 0,
-          ultimaFecha: r.fecha,
-        };
-        order.push(k);
-      }
-      map[k].movs += 1;
-      map[k].total += r.total || 0;
-      if (r.fecha > map[k].ultimaFecha) map[k].ultimaFecha = r.fecha;
-    });
-    return order.map((k) => map[k]);
-  })();
-
-  const totalUnidadesFiltradas = filtrados.reduce((acc, r) => acc + (r.total || 0), 0);
-
   const handleBorrar = (r: Ingreso) => {
     if (
       !window.confirm(
@@ -606,15 +475,9 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
     }
     const remaining = ingresos.filter((x) => x.id !== r.id);
     onBorrarRemoto(r.id);
+    encolarDel(r.id, 'ingresos');
     onIngresosChange(remaining);
     onToast('ok', `Ingreso de OP ${r.op} (${r.total || 0} u) eliminado`);
-  };
-
-  const handleGuardarEdicionIng = (updated: Ingreso) => {
-    const next = ingresos.map((x) => (x.id === updated.id ? { ...updated, sync: false } : x));
-    onIngresosChange(next, [updated]);
-    setEditingIng(null);
-    onToast('ok', `Ingreso de OP ${updated.op} actualizado (${updated.total} u)`);
   };
 
   const handleExportExcel = () => {
@@ -710,8 +573,8 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
         >
           <span>
             {catLoading
-              ? 'Descargando catálogo de OPs desde Supabase...'
-              : `El catálogo de OPs está vacío (0 OP)${catErr ? ` · ${catErr}` : ''}.`}
+              ? '⏳ Descargando catálogo de OPs desde Supabase...'
+              : `⚠️ El catálogo de OPs está vacío (0 OP)${catErr ? ` · ${catErr}` : ''}.`}
           </span>
           {onRecargarCatalogo && !catLoading && (
             <button
@@ -720,12 +583,11 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
               style={{ minHeight: '32px', padding: '4px 12px', borderColor: 'var(--amber)', fontWeight: 700 }}
               onClick={onRecargarCatalogo}
             >
-              Cargar catálogo ahora
+              🔄 Cargar catálogo ahora
             </button>
           )}
         </div>
       )}
-
       {/* Mode switcher */}
       <div className="chips modo" id="imodoReg">
         <button
@@ -750,17 +612,9 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
           <div className="sec">Ingreso rápido a almacén</div>
           <div className="resumen" id="igResumen">
             Filas listas: <b>{gridListas}</b> · Con errores: <b>{gridConErr}</b> · Unidades a
-            ingresar: <b className="mono">{gridUds}</b>
+            ingresar: <b>{gridUds}</b>
           </div>
           <div className="tools" style={{ marginBottom: 0 }}>
-            <button
-              className="btn-s"
-              type="button"
-              onClick={() => setShowQrScanner(true)}
-              style={{ borderColor: 'var(--amber)', fontWeight: 700 }}
-            >
-              Escanear QR
-            </button>
             <button
               className="btn-s"
               type="button"
@@ -926,7 +780,9 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
             {gridListas ? `Guardar ${gridListas} fila(s) lista(s)` : 'Guardar filas listas'}
           </button>
           <div className="ayuda">
-            Puedes escanear etiquetas QR, pegar desde Excel (OP, Unid., Cant.) o escribir la OP y el sistema recordará el último empaque usado.
+            Enter o Tab: siguiente celda · Enter en la última celda: nueva fila · Flechas ↑ ↓:
+            cambiar de fila · Ctrl+Enter: guardar · Puedes pegar desde Excel columnas OP, Unid.,
+            Cant. en la celda OP. La tabla se guarda sola como borrador por fecha de ingreso.
           </div>
         </div>
       )}
@@ -935,17 +791,7 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
       {modoIng === 'form' && (
         <div id="ingForm" className="panel">
           <div className="fcol">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <div className="sec" style={{ margin: 0 }}>Ingreso a almacén</div>
-              <button
-                type="button"
-                className="btn-s"
-                style={{ minHeight: '34px', padding: '4px 12px', borderColor: 'var(--amber)', fontWeight: 700 }}
-                onClick={() => setShowQrScanner(true)}
-              >
-                Escanear QR
-              </button>
-            </div>
+            <div className="sec">Ingreso a almacén</div>
             <div className="field">
               <label>OP</label>
               <input
@@ -1150,47 +996,19 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
         </div>
       </div>
 
-      {/* View Switcher */}
-      <div className="chips modo">
-        <button
-          className={`chip ${vistaIng === 'lista' ? 'active' : ''}`}
-          type="button"
-          onClick={() => setVistaIng('lista')}
-        >
-          Entradas ({filtrados.length})
-        </button>
-        <button
-          className={`chip ${vistaIng === 'resumen' ? 'active' : ''}`}
-          type="button"
-          onClick={() => setVistaIng('resumen')}
-        >
-          Acumulado por OP ({resumenPorOp.length})
-        </button>
-      </div>
-
       {/* Tools */}
       <div className="tools">
-        <button
-          className={`btn-s ${filterFecha === hoy() ? 'btn-s-active' : ''}`}
-          type="button"
-          onClick={() => setFilterFecha(filterFecha === hoy() ? '' : hoy())}
-        >
-          Hoy
-        </button>
-        <button
-          className={`btn-s ${filterFecha === offsetFechaIso(-1) ? 'btn-s-active' : ''}`}
-          type="button"
-          onClick={() =>
-            setFilterFecha(filterFecha === offsetFechaIso(-1) ? '' : offsetFechaIso(-1))
-          }
-        >
-          Ayer
-        </button>
         <button className="btn-s" id="iExp" type="button" onClick={handleExportExcel}>
           Excel
         </button>
         <button className="btn-s" id="iImp" type="button" onClick={handleImprimir}>
           Imprimir
+        </button>
+        <button className="btn-s" id="iEnv" type="button" onClick={onEnviarSheets}>
+          Enviar a Sheets
+        </button>
+        <button className="btn-s" id="iTraer" type="button" onClick={onTraerSheets}>
+          Traer de Sheets
         </button>
         <button
           className="btn-s"
@@ -1205,57 +1023,13 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
         >
           Quitar filtros
         </button>
-        <span id="iCuenta" className="mono">
-          {filtrados.length} ingreso(s) · {totalUnidadesFiltradas.toLocaleString('es-PE')} u
-        </span>
+        <span id="iCuenta">{filtrados.length} ingreso(s)</span>
       </div>
 
       {/* Ingresos List Table */}
       <div id="iLista">
         {!filtrados.length ? (
           <div className="empty">Sin ingresos.</div>
-        ) : vistaIng === 'resumen' ? (
-          <div className="table-wrap">
-            <table className="list-table">
-              <thead>
-                <tr>
-                  <th className="k">#</th>
-                  <th className="th-op">OP</th>
-                  <th>Cliente</th>
-                  <th>SAP / Descripción</th>
-                  <th className="k">Último ing.</th>
-                  <th className="n">Movimientos</th>
-                  <th className="n">Total ingresado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resumenPorOp.map((item, idx) => (
-                  <tr key={`${item.op}_${item.sap}_${idx}`}>
-                    <td className="k" style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
-                      {idx + 1}
-                    </td>
-                    <td className="td-op op-cell">
-                      <span className="op mono">{item.op}</span>
-                    </td>
-                    <td>{item.cliente || '—'}</td>
-                    <td>
-                      <div style={{ fontWeight: 500 }}>{item.descripcion || '—'}</div>
-                      {item.sap && (
-                        <div className="mono" style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>
-                          SAP {item.sap}
-                        </div>
-                      )}
-                    </td>
-                    <td className="k mono">{fcorta(item.ultimaFecha)}</td>
-                    <td className="n mono">{item.movs}</td>
-                    <td className="n mono">
-                      <strong>{item.total.toLocaleString('es-PE')} u</strong>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         ) : (
           <div className="table-wrap">
             <table className="list-table">
@@ -1313,17 +1087,10 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
                       <td className="n mono">
                         <strong>{r.total || 0} u</strong>
                       </td>
-                      <td className="k" title={r.sync ? 'Sincronizado en la nube' : 'Pendiente'}>
+                      <td className="k" title={r.sync ? 'Sincronizado' : 'Pendiente'}>
                         {r.sync ? '☁️' : '⏳'}
                       </td>
                       <td className="actions">
-                        <button
-                          className="stock-btn"
-                          type="button"
-                          onClick={() => setEditingIng(r)}
-                        >
-                          Editar
-                        </button>
                         <button
                           className="del-btn"
                           type="button"
@@ -1340,24 +1107,6 @@ export const IngresosTab: React.FC<IngresosTabProps> = ({
           </div>
         )}
       </div>
-
-      {showQrScanner && (
-        <QrScannerModal
-          catalogo={catalogo}
-          onScan={handleQrScanned}
-          onClose={() => setShowQrScanner(false)}
-        />
-      )}
-
-      {editingIng && (
-        <EditarEntradaModal
-          tipo="ingreso"
-          item={editingIng}
-          nombres={nombres}
-          onClose={() => setEditingIng(null)}
-          onSave={handleGuardarEdicionIng}
-        />
-      )}
     </div>
   );
 };

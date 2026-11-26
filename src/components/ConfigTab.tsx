@@ -5,8 +5,7 @@ import { catTs, leerCatalogoSb, normOpSb } from '../services/supabase';
 import { K_CAT, K_CATTS, K_RES, ld, sv } from '../services/storage';
 import { archivoOk } from '../services/excel';
 import { hoy, norm, sanitizarStockDuplicados } from '../utils/helpers';
-import { ADMIN_EMAIL, createTeamUserAccount } from '../services/firebase';
-import { validoRec } from '../services/firestoreSync';
+import { encolarDel, validoRec } from '../services/sheets';
 import { QrEtiquetasModal } from './QrEtiquetasModal';
 
 interface ConfigTabProps {
@@ -15,20 +14,11 @@ interface ConfigTabProps {
   catalogo: CatalogoOp[];
   onCatalogoChange: (newCat: CatalogoOp[]) => void;
   registros: Registro[];
-  onRegistrosChange: (newRegs: Registro[], toSend?: Registro[]) => void;
+  onRegistrosChange: (newRegs: Registro[]) => void;
   ingresos: Ingreso[];
-  onIngresosChange: (newIngs: Ingreso[], toSend?: Ingreso[]) => void;
+  onIngresosChange: (newIngs: Ingreso[]) => void;
   catErr: string;
   onCatErrChange: (err: string) => void;
-  userEmail: string;
-  canManageTeam: boolean;
-  teamEmails: string[];
-  onTeamEmailsChange: (emails: string[]) => Promise<void>;
-  legacyPending: { registros: number; ingresos: number; planes: number; extras: number };
-  migrating: boolean;
-  onMigrateLocal: () => Promise<void>;
-  onBorrarRemoto: (id: string) => void;
-  onSignOut: () => void;
   onToast: (t: 'ok' | 'error', m: string) => void;
 }
 
@@ -43,21 +33,9 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
   onIngresosChange,
   catErr,
   onCatErrChange,
-  userEmail,
-  canManageTeam,
-  teamEmails,
-  onTeamEmailsChange,
-  legacyPending,
-  migrating,
-  onMigrateLocal,
-  onBorrarRemoto,
-  onSignOut,
   onToast,
 }) => {
   const [nombresTxt, setNombresTxt] = useState('');
-  const [newEmailTxt, setNewEmailTxt] = useState('');
-  const [newUserPass, setNewUserPass] = useState('');
-  const [savingTeam, setSavingTeam] = useState(false);
   const [pwaItems, setPwaItems] = useState<{ ok: boolean | null; text: string }[]>([]);
   const [ultimoRespaldo, setUltimoRespaldo] = useState<string | null>(() =>
     ld<string | null>(K_RES, null)
@@ -189,76 +167,6 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
   const handleRemoveNombre = (n: string) => {
     const updated = nombres.filter((x) => x !== n);
     onNombresChange(updated);
-  };
-
-  // Team user permissions & account creation
-  const handleAddTeamEmail = async () => {
-    const candidate = newEmailTxt.trim().toLowerCase();
-    if (!candidate || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate)) {
-      onToast('error', 'Ingresa un correo electrónico válido');
-      return;
-    }
-    if (teamEmails.includes(candidate)) {
-      onToast('error', 'Ese correo ya está en la lista');
-      return;
-    }
-    if (teamEmails.length >= 15) {
-      onToast('error', 'Máximo 15 usuarios autorizados en el equipo');
-      return;
-    }
-
-    const pass = newUserPass.trim();
-    if (pass && pass.length < 6) {
-      onToast('error', 'Si asignas contraseña, debe tener al menos 6 caracteres');
-      return;
-    }
-
-    setSavingTeam(true);
-    try {
-      if (pass) {
-        await createTeamUserAccount(candidate, pass);
-      }
-      await onTeamEmailsChange([...teamEmails, candidate]);
-      setNewEmailTxt('');
-      setNewUserPass('');
-      onToast(
-        'ok',
-        pass
-          ? `Usuario ${candidate} creado y autorizado (debe abrir el correo de verificación una vez)`
-          : `${candidate} autorizado en el equipo compartido`
-      );
-    } catch (err: any) {
-      const code = String(err?.code || '');
-      if (code === 'auth/email-already-in-use') {
-        await onTeamEmailsChange([...teamEmails, candidate]);
-        setNewEmailTxt('');
-        setNewUserPass('');
-        onToast('ok', `La cuenta ya existía; ${candidate} fue autorizado en el equipo`);
-      } else if (code === 'auth/operation-not-allowed') {
-        onToast(
-          'error',
-          'Activa «Email/Password» en Firebase Console → Authentication → Sign-in method para crear usuarios con clave.'
-        );
-      } else {
-        onToast('error', String(err?.message || 'No se pudo agregar al usuario'));
-      }
-    } finally {
-      setSavingTeam(false);
-    }
-  };
-
-  const handleRemoveTeamEmail = async (emailToRemove: string) => {
-    if (emailToRemove.toLowerCase() === userEmail.toLowerCase()) {
-      onToast('error', 'No puedes quitar tu propio correo de administrador');
-      return;
-    }
-    setSavingTeam(true);
-    try {
-      await onTeamEmailsChange(teamEmails.filter((e) => e !== emailToRemove));
-      onToast('ok', `${emailToRemove} retirado del equipo`);
-    } finally {
-      setSavingTeam(false);
-    }
   };
 
   // Supabase update
@@ -455,7 +363,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
   // Download Backup
   const handleDescargarRespaldo = () => {
     const o = {
-      version: 2,
+      version: 1,
       fecha: new Date().toISOString(),
       registros,
       ingresos,
@@ -481,7 +389,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
     }
   };
 
-  // Restore Backup -> also uploads new records to Firestore!
+  // Restore Backup
   const handleRestaurarRespaldo = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = '';
@@ -534,7 +442,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
 
       if (
         !window.confirm(
-          `Respaldo del ${String(o.fecha || '').slice(0, 10)}:\n• ${nR.length} registro(s) y ${nI.length} ingreso(s) que no existen aquí se agregarán y subirán a la nube\n• ${(R.ok.length - nR.length) + (I.ok.length - nI.length)} ya existen y no se tocan${mal ? `\n• ${mal} con datos incompletos se omiten` : ''}\n\n¿Restaurar?`
+          `Respaldo del ${String(o.fecha || '').slice(0, 10)}:\n• ${nR.length} registro(s) y ${nI.length} ingreso(s) que no existen aquí se agregarán\n• ${(R.ok.length - nR.length) + (I.ok.length - nI.length)} ya existen y no se tocan${mal ? `\n• ${mal} con datos incompletos se omiten` : ''}\n\n¿Restaurar?`
         )
       ) {
         return;
@@ -561,159 +469,16 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
       newNombres.sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
 
       onNombresChange(newNombres);
-      onRegistrosChange(newCombinedRegs, nR);
-      onIngresosChange(newCombinedIngs, nI);
+      onRegistrosChange(newCombinedRegs);
+      onIngresosChange(newCombinedIngs);
 
-      onToast('ok', `Restaurado y subiendo a Firebase: ${nR.length} registro(s) y ${nI.length} ingreso(s)`);
+      onToast('ok', `Restaurado: ${nR.length} registro(s) y ${nI.length} ingreso(s)`);
     };
     rd.readAsText(f);
   };
 
-  const totalLegacyPend =
-    legacyPending.registros +
-    legacyPending.ingresos +
-    legacyPending.planes +
-    legacyPending.extras;
-
   return (
     <div id="t-cfg">
-      {/* Nube Firebase & Equipo */}
-      <div className="panel">
-        <div className="sec">Nube Firebase y cuenta</div>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '8px',
-            flexWrap: 'wrap',
-            marginBottom: '12px',
-          }}
-        >
-          <div>
-            <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>{userEmail}</div>
-            <div className="info" style={{ fontSize: '0.78rem' }}>
-              Sincronización en tiempo real en Firestore (sin Google Sheets)
-            </div>
-          </div>
-          <button
-            type="button"
-            className="btn-s"
-            onClick={onSignOut}
-          >
-            Cerrar sesión
-          </button>
-        </div>
-
-        <div
-          style={{
-            padding: '10px 12px',
-            borderRadius: '10px',
-            border: `1px solid ${totalLegacyPend > 0 ? 'var(--amber)' : 'var(--border)'}`,
-            background: totalLegacyPend > 0 ? 'var(--amber-soft)' : 'var(--alt)',
-            marginBottom: '14px',
-          }}
-        >
-          <div style={{ fontWeight: 700, fontSize: '0.86rem', marginBottom: '4px' }}>
-            Migración de datos locales a la nube
-          </div>
-          <div className="info" style={{ fontSize: '0.8rem', marginBottom: totalLegacyPend > 0 ? '8px' : 0 }}>
-            {totalLegacyPend > 0
-              ? `Hay ${legacyPending.registros} registro(s), ${legacyPending.ingresos} ingreso(s), ${legacyPending.planes} lista(s) y ${legacyPending.extras} estado(s) locales sin subir.`
-              : 'Todos los datos locales detectados en este equipo ya están en la nube.'}
-          </div>
-          {totalLegacyPend > 0 && (
-            <button
-              type="button"
-              className="btn"
-              disabled={migrating}
-              style={{ minHeight: '38px', padding: '6px 12px', fontSize: '0.86rem' }}
-              onClick={onMigrateLocal}
-            >
-              {migrating ? 'Migrando a Firebase...' : 'Migrar datos locales a Firestore ahora'}
-            </button>
-          )}
-        </div>
-
-        <div style={{ fontWeight: 700, fontSize: '0.86rem', marginBottom: '6px' }}>
-          Usuarios del equipo ({teamEmails.length}/15)
-        </div>
-        <p className="info" style={{ margin: '0 0 10px', fontSize: '0.78rem' }}>
-          Autoriza a tus compañeros por correo o créales su usuario con contraseña directamente aquí. Todos compartirán las entregas e ingresos en tiempo real.
-        </p>
-
-        {canManageTeam && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
-            <div className="row2" style={{ gap: '8px' }}>
-              <input
-                type="email"
-                placeholder="Correo del usuario"
-                value={newEmailTxt}
-                onChange={(e) => setNewEmailTxt(e.target.value)}
-              />
-              <input
-                type="password"
-                placeholder="Contraseña (opcional, mín. 6)"
-                value={newUserPass}
-                onChange={(e) => setNewUserPass(e.target.value)}
-              />
-            </div>
-            <button
-              type="button"
-              className="btn-s"
-              disabled={savingTeam}
-              style={{ borderColor: 'var(--amber)', fontWeight: 700, width: '100%' }}
-              onClick={handleAddTeamEmail}
-            >
-              {savingTeam
-                ? 'Guardando...'
-                : newUserPass.trim()
-                ? '+ Crear usuario y autorizar acceso'
-                : '+ Autorizar correo existente'}
-            </button>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {teamEmails.map((em) => {
-            const isAdm = em.toLowerCase() === ADMIN_EMAIL || em.toLowerCase() === userEmail.toLowerCase();
-            return (
-              <div
-                key={em}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '7px 10px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border)',
-                  background: 'var(--field)',
-                  fontSize: '0.84rem',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                  <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {em}
-                  </span>
-                  <span className="user-role-tag">{isAdm ? 'Admin' : 'Usuario'}</span>
-                </div>
-                {canManageTeam && em.toLowerCase() !== userEmail.toLowerCase() && (
-                  <button
-                    type="button"
-                    className="del"
-                    disabled={savingTeam}
-                    onClick={() => handleRemoveTeamEmail(em)}
-                  >
-                    Quitar
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Habilitadores panel */}
       <div className="panel">
         <div className="sec">Habilitadores</div>
@@ -763,6 +528,27 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
         </div>
       </div>
 
+      {/* PWA Panel */}
+      <div className="panel">
+        <div className="sec">Instalación de la app (PWA)</div>
+        <div id="pwaDiag" style={{ fontSize: '0.85rem', color: 'var(--muted2)', lineHeight: 1.4 }}>
+          {pwaItems.map((it, idx) => (
+            <div key={idx} style={{ margin: '3px 0' }}>
+              {it.ok === null ? 'ℹ️' : it.ok ? '✅' : '❌'} {it.text}
+            </div>
+          ))}
+        </div>
+        <button
+          className="btn-s"
+          id="pwaRevisar"
+          type="button"
+          style={{ marginTop: '8px' }}
+          onClick={runPwaDiag}
+        >
+          Revisar de nuevo
+        </button>
+      </div>
+
       {/* Catálogo de OP */}
       <div className="panel">
         <div className="sec">Catálogo de OP</div>
@@ -776,7 +562,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
                 minute: '2-digit',
               })}`
             : ''}
-          {catErr ? ` · ${catErr}` : ''}
+          {catErr ? ` · ⚠️ ${catErr}` : ''}
         </p>
         <div className="tools">
           <button
@@ -802,7 +588,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
             onClick={() => setShowQrEtiquetas(true)}
             style={{ borderColor: 'var(--amber)', fontWeight: 700 }}
           >
-            Etiquetas QR (zDesign)
+            🏷️ Etiquetas QR (zDesign)
           </button>
           <input
             type="file"
@@ -813,15 +599,18 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
           />
         </div>
         <p className="info" style={{ margin: 0, fontSize: '0.78rem' }}>
-          El catálogo se lee de la tabla <b>catalogo_op</b> de Supabase y se guarda en caché local (IndexedDB) para funcionar incluso sin internet.
+          El catálogo se lee de la tabla <b>catalogo_op</b> de Supabase (la misma de las otras apps)
+          y se actualiza solo cada 4 horas al abrir la app. Si cargaron OP nuevas, toca «Actualizar».
+          «Importar Excel» solo sirve en este equipo y se reemplaza al actualizar.
         </p>
       </div>
 
       {/* Respaldo de datos */}
       <div className="panel">
-        <div className="sec">Respaldo de datos (JSON)</div>
+        <div className="sec">Respaldo de datos</div>
         <p className="info" style={{ margin: '0 0 10px' }}>
-          Descarga una copia local de seguridad en JSON. Al restaurar un archivo JSON solo se agregan los registros que faltan y se sincronizan automáticamente con Firebase.
+          Descarga una copia de tus registros e ingresos. Al restaurar solo se agregan los que no
+          existen; nunca se borra ni se pisa nada.
         </p>
         <div className="tools">
           <button
@@ -859,7 +648,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
       <div className="panel">
         <div className="sec">Mantenimiento de stock inicial</div>
         <p className="info" style={{ margin: '0 0 10px' }}>
-          Analiza y consolida el stock inicial de todas las OPs en sus despachos correspondientes, eliminando entradas duplicadas tanto en la memoria local como en Firebase Firestore.
+          Analiza y consolida el stock inicial de todas las OPs en sus despachos correspondientes, eliminando entradas duplicadas residuales tanto en la memoria local como en Google Sheets.
         </p>
         <div className="tools">
           <button
@@ -871,7 +660,7 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
                 onToast('ok', 'Excelente: no se detectaron duplicados de stock inicial');
                 return;
               }
-              duplicadosEliminados.forEach((d) => onBorrarRemoto(d.id));
+              duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
               onRegistrosChange(registrosLimpios);
               onToast(
                 'ok',
@@ -879,30 +668,9 @@ export const ConfigTab: React.FC<ConfigTabProps> = ({
               );
             }}
           >
-            Depurar stock duplicado
+            🧹 Depurar stock duplicado
           </button>
         </div>
-      </div>
-
-      {/* PWA Panel */}
-      <div className="panel">
-        <div className="sec">Instalación de la app (PWA)</div>
-        <div id="pwaDiag" style={{ fontSize: '0.85rem', color: 'var(--muted2)', lineHeight: 1.4 }}>
-          {pwaItems.map((it, idx) => (
-            <div key={idx} style={{ margin: '3px 0' }}>
-              {it.ok === null ? 'ℹ️' : it.ok ? '✅' : '❌'} {it.text}
-            </div>
-          ))}
-        </div>
-        <button
-          className="btn-s"
-          id="pwaRevisar"
-          type="button"
-          style={{ marginTop: '8px' }}
-          onClick={runPwaDiag}
-        >
-          Revisar de nuevo
-        </button>
       </div>
 
       {showQrEtiquetas && (

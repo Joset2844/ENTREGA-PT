@@ -10,10 +10,7 @@
     "preview": "vite preview --port 3000"
   },
   "dependencies": {
-    "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "@types/qrcode": "^1.5.6",
-    "eslint": "^10.15.0",
-    "firebase": "^13.4.0",
     "jsqr": "^1.4.0",
     "lucide-react": "^0.475.0",
     "qrcode": "^1.5.4",

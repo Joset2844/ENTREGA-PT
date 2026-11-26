@@ -1,12 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import {
-  collection,
-  doc,
-  onSnapshot,
-  query,
-  where,
-} from 'firebase/firestore';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   CatalogoOp,
   Ingreso,
@@ -36,127 +28,31 @@ import {
   sv,
 } from './services/storage';
 import {
-  ADMIN_EMAIL,
-  auth,
-  db,
-  handleFirestoreError,
-  OperationType,
-  WORKSPACE_DOC_ID,
-} from './services/firebase';
-import {
-  COL_INGRESOS,
-  COL_OP_EXTRAS,
-  COL_PLANES,
-  COL_REGISTROS,
-  COL_WORKSPACES,
-  deleteIngresoFs,
-  deleteRegistroFs,
-  DocMeta,
-  migrateLegacyLocalDataFs,
+  colaDel,
+  encolarDel,
+  huella,
+  llamar,
   normFecha,
-  opExtraDocId,
-  propagateTeamEmailsFs,
-  sanitizeDocId,
-  saveIngresosBatchFs,
-  saveOpExtraFs,
-  savePlanFs,
-  saveRegistrosBatchFs,
-  saveWorkspaceConfigFs,
-  setDocMetaCache,
-} from './services/firestoreSync';
+  procesarDel,
+  recRemotoOk,
+  soloValidos,
+} from './services/sheets';
 import { CAT_HORAS, leerCatalogoSb, normOpSb } from './services/supabase';
-import { hoy, sanitizarStockDuplicados } from './utils/helpers';
-import { AppTab, Header } from './components/Header';
+import { hoy, recalcularEstados, sanitizarStockDuplicados } from './utils/helpers';
+import { Header } from './components/Header';
 import { Toasts } from './components/Toasts';
 import { SyncBadge } from './components/SyncBadge';
-import { AuthGate } from './components/AuthGate';
-import { TableroTab } from './components/TableroTab';
 import { RegistrarTab } from './components/RegistrarTab';
 import { RegistrosTab } from './components/RegistrosTab';
 import { IngresosTab } from './components/IngresosTab';
 import { ConfigTab } from './components/ConfigTab';
 
-function normalizeLegacyRegistros(raw: any[]): Registro[] {
-  const mapped = (Array.isArray(raw) ? raw : []).map((r: any) => {
-    const copy = { ...r };
-    if (!copy.mov && copy.total === undefined) {
-      const e = (copy.entTotal || 0) > 0;
-      copy.mov = e ? 'Entregado' : 'Por entregar';
-      copy.empaque = e ? copy.entTipo : copy.porTipo;
-      copy.u = e ? copy.entU : copy.porU;
-      copy.c = e ? copy.entC : copy.porC;
-      copy.total = e ? copy.entTotal : copy.porTotal;
-      copy.estado = copy.estado || '';
-    }
-    if (copy.pedido === undefined) {
-      if (copy.mov === 'Por entregar') {
-        copy.pedido = copy.total || 0;
-        copy.total = 0;
-        copy.u = 0;
-        copy.c = 0;
-      } else {
-        copy.pedido = 0;
-      }
-    }
-    if (!copy.fdesp) copy.fdesp = copy.fecha;
-    return copy as Registro;
-  });
-  return sanitizarStockDuplicados(mapped).registrosLimpios;
-}
-
 export const App: React.FC = () => {
-  // Fatal async Firestore error (propagated to ErrorBoundary on render)
-  const [fatalError, setFatalError] = useState<Error | null>(null);
-  if (fatalError) {
-    throw fatalError;
-  }
+  // Navigation
+  const [activeTab, setActiveTab] = useState<'reg' | 'lista' | 'ing' | 'cfg'>('reg');
 
-  // Firebase Auth state
-  const [user, setUser] = useState<User | null>(null);
-  const [authReady, setAuthReady] = useState(false);
-  const [authRefreshTick, setAuthRefreshTick] = useState(0);
-
-  // Navigation & prefill
-  const [activeTab, setActiveTab] = useState<AppTab>('dash');
-  const [prefillOp, setPrefillOp] = useState<{
-    op: string;
-    fdesp?: string;
-    nonce: number;
-  } | null>(null);
-
-  // Legacy local snapshots (preserved so existing data stays visible & 1-click migratable)
-  const [legacyRegistros, setLegacyRegistros] = useState<Registro[]>(() =>
-    normalizeLegacyRegistros(ld<any[]>(K_REG, []))
-  );
-  const [legacyIngresos, setLegacyIngresos] = useState<Ingreso[]>(() =>
-    ld<Ingreso[]>(K_ING, [])
-  );
-  const [legacyPlanes, setLegacyPlanes] = useState<Record<string, PlanDespacho>>(() =>
-    ld<Record<string, PlanDespacho>>(K_PLAN, {})
-  );
-  const [legacyPlanesOp, setLegacyPlanesOp] = useState<Record<string, PlanOp>>(() =>
-    ld<Record<string, PlanOp>>(K_PLANOP, {})
-  );
-  const [legacyOpExtra, setLegacyOpExtra] = useState<Record<string, OpExtra>>(() =>
-    ld<Record<string, OpExtra>>(K_OP_EXTRA, {})
-  );
-  const [legacyNombres, setLegacyNombres] = useState<string[]>(() =>
-    ld<string[]>(K_NOM, [])
-  );
-
-  // Cloud Firestore snapshots
-  const [cloudRegistros, setCloudRegistros] = useState<Registro[]>([]);
-  const [cloudIngresos, setCloudIngresos] = useState<Ingreso[]>([]);
-  const [cloudPlanes, setCloudPlanes] = useState<Record<string, PlanDespacho>>({});
-  const [cloudPlanesOp, setCloudPlanesOp] = useState<Record<string, PlanOp>>({});
-  const [cloudOpExtra, setCloudOpExtra] = useState<Record<string, OpExtra>>({});
-  const [cloudNombres, setCloudNombres] = useState<string[]>([]);
-  const [teamEmails, setTeamEmails] = useState<string[]>([ADMIN_EMAIL]);
-  const [workspaceMeta, setWorkspaceMeta] = useState<DocMeta | undefined>(undefined);
-  const [cloudReady, setCloudReady] = useState(false);
-  const [migrating, setMigrating] = useState(false);
-
-  // Catalog state (Supabase + IndexedDB)
+  // Shared Data
+  const [nombres, setNombres] = useState<string[]>(() => ld<string[]>(K_NOM, []));
   const [catalogo, setCatalogo] = useState<CatalogoOp[]>(() => {
     const raw = ld<CatalogoOp[]>(K_CAT, []);
     return raw.map((c) => {
@@ -168,6 +64,65 @@ export const App: React.FC = () => {
   const [catErr, setCatErr] = useState('');
   const catCountRef = useRef(catalogo.length);
   catCountRef.current = catalogo.length;
+
+  const [registros, setRegistros] = useState<Registro[]>(() => {
+    const raw = ld<Registro[]>(K_REG, []);
+    const mapped = raw.map((r: any) => {
+      if (!r.mov && r.total === undefined) {
+        const e = (r.entTotal || 0) > 0;
+        r.mov = e ? 'Entregado' : 'Por entregar';
+        r.empaque = e ? r.entTipo : r.porTipo;
+        r.u = e ? r.entU : r.porU;
+        r.c = e ? r.entC : r.porC;
+        r.total = e ? r.entTotal : r.porTotal;
+        r.estado = r.estado || '';
+      }
+      if (r.pedido === undefined) {
+        if (r.mov === 'Por entregar') {
+          r.pedido = r.total || 0;
+          r.total = 0;
+          r.u = 0;
+          r.c = 0;
+        } else {
+          r.pedido = 0;
+        }
+      }
+      if (!r.fdesp) r.fdesp = r.fecha;
+      return r;
+    });
+
+    const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(mapped);
+    if (duplicadosEliminados.length > 0) {
+      duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
+      sv(K_REG, registrosLimpios);
+    }
+    return registrosLimpios;
+  });
+
+  const [ingresos, setIngresos] = useState<Ingreso[]>(() => ld<Ingreso[]>(K_ING, []));
+  const [planes, setPlanes] = useState<Record<string, PlanDespacho>>(() =>
+    ld<Record<string, PlanDespacho>>(K_PLAN, {})
+  );
+  const [planesOp, setPlanesOp] = useState<Record<string, PlanOp>>(() =>
+    ld<Record<string, PlanOp>>(K_PLANOP, {})
+  );
+  const [opExtra, setOpExtra] = useState<Record<string, OpExtra>>(() =>
+    ld<Record<string, OpExtra>>(K_OP_EXTRA, {})
+  );
+
+  const handleUpdateOpExtra = useCallback((op: string, fd: string, changes: Partial<OpExtra>) => {
+    const k = op.trim().toLowerCase() + '|' + (fd || '');
+    setOpExtra((prev) => {
+      const cur = prev[k] || prev[op.trim().toLowerCase()] || {};
+      const nextVal = { ...cur, ...changes };
+      const updated = { ...prev, [k]: nextVal };
+      if (!fd) {
+        updated[op.trim().toLowerCase()] = nextVal;
+      }
+      sv(K_OP_EXTRA, updated);
+      return updated;
+    });
+  }, []);
 
   // Reg Context
   const [fecha, setFecha] = useState(() => {
@@ -209,10 +164,16 @@ export const App: React.FC = () => {
     ld<'tabla' | 'form'>(K_MODO_ING, 'tabla')
   );
 
-  // Sync status
+  // Sync state
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [syncOk, setSyncOk] = useState(true);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(new Date());
+  const syncBusyRef = useRef(false);
+  const syncStartRef = useRef(0);
+  const syncFailCountRef = useRef(0);
+  const syncNextRetryRef = useRef(0);
+  const lastKeyTimeRef = useRef(0);
+  const firmaRef = useRef<{ reg?: string; ing?: string }>({});
 
   // Toasts
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -221,7 +182,7 @@ export const App: React.FC = () => {
     setToasts((prev) => [...prev, { id, tipo, mensaje }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 2800);
+    }, 2600);
   }, []);
 
   // PWA Prompt
@@ -271,6 +232,12 @@ export const App: React.FC = () => {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    const handleKeyActivity = () => {
+      lastKeyTimeRef.current = Date.now();
+    };
+    document.addEventListener('input', handleKeyActivity, true);
+    document.addEventListener('focusin', handleKeyActivity, true);
+
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
       window.removeEventListener('appinstalled', handleAppInstalled);
@@ -278,240 +245,12 @@ export const App: React.FC = () => {
       window.removeEventListener('pwa-installed', handleAppInstalled);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('input', handleKeyActivity, true);
+      document.removeEventListener('focusin', handleKeyActivity, true);
     };
   }, [toast]);
 
-  // Auth listener
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setAuthReady(true);
-      if (!u) {
-        setCloudReady(false);
-        setCloudRegistros([]);
-        setCloudIngresos([]);
-        setCloudPlanes({});
-        setCloudPlanesOp({});
-        setCloudOpExtra({});
-        setCloudNombres([]);
-        setWorkspaceMeta(undefined);
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  // Real-time Firestore listeners (only active when authenticated with verified email)
-  useEffect(() => {
-    if (!authReady || !user || !user.emailVerified || !user.email) return;
-
-    const userEmail = user.email.toLowerCase();
-    const isAdmin = userEmail === ADMIN_EMAIL;
-
-    const wrapErr = (opType: OperationType, path: string) => (err: unknown) => {
-      setSyncOk(false);
-      try {
-        handleFirestoreError(err, opType, path);
-      } catch (wrapped) {
-        setFatalError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
-      }
-    };
-
-    const qReg = isAdmin
-      ? collection(db, COL_REGISTROS)
-      : query(collection(db, COL_REGISTROS), where('allowedEmails', 'array-contains', userEmail));
-
-    const qIng = isAdmin
-      ? collection(db, COL_INGRESOS)
-      : query(collection(db, COL_INGRESOS), where('allowedEmails', 'array-contains', userEmail));
-
-    const qPlan = isAdmin
-      ? collection(db, COL_PLANES)
-      : query(collection(db, COL_PLANES), where('allowedEmails', 'array-contains', userEmail));
-
-    const qExtra = isAdmin
-      ? collection(db, COL_OP_EXTRAS)
-      : query(collection(db, COL_OP_EXTRAS), where('allowedEmails', 'array-contains', userEmail));
-
-    const unsubReg = onSnapshot(
-      qReg,
-      { includeMetadataChanges: true },
-      (snap) => {
-        const metaMap = new Map<string, DocMeta>();
-        const list: Registro[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as any;
-          metaMap.set(d.id, {
-            ownerUid: data.ownerUid,
-            ownerEmail: data.ownerEmail,
-            allowedEmails: data.allowedEmails || [],
-            createdAt: data.createdAt,
-          });
-          list.push({
-            id: data.id || d.id,
-            fecha: data.fecha || '',
-            fdesp: data.fdesp || data.fecha || '',
-            turno: data.turno || 'Día',
-            nombre: data.nombre || '',
-            op: data.op || '',
-            sap: data.sap || '',
-            descripcion: data.descripcion || '',
-            cliente: data.cliente || '',
-            pedido: Number(data.pedido) || 0,
-            empaque: data.empaque || 'caja',
-            u: Number(data.u) || 0,
-            c: Number(data.c) || 0,
-            total: Number(data.total) || 0,
-            estado: data.estado || '',
-            creado: data.creado || '',
-            ord: typeof data.ord === 'number' ? data.ord : undefined,
-            sync: !d.metadata.hasPendingWrites,
-          });
-        });
-        list.sort((a, b) => String(b.creado).localeCompare(String(a.creado)));
-        setDocMetaCache('reg', metaMap);
-        setCloudRegistros(list);
-        setCloudReady(true);
-        setSyncOk(true);
-        setLastSyncTime(new Date());
-      },
-      wrapErr(OperationType.LIST, COL_REGISTROS)
-    );
-
-    const unsubIng = onSnapshot(
-      qIng,
-      { includeMetadataChanges: true },
-      (snap) => {
-        const metaMap = new Map<string, DocMeta>();
-        const list: Ingreso[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as any;
-          metaMap.set(d.id, {
-            ownerUid: data.ownerUid,
-            ownerEmail: data.ownerEmail,
-            allowedEmails: data.allowedEmails || [],
-            createdAt: data.createdAt,
-          });
-          list.push({
-            id: data.id || d.id,
-            fecha: data.fecha || '',
-            turno: data.turno || 'Día',
-            nombre: data.nombre || '',
-            op: data.op || '',
-            sap: data.sap || '',
-            descripcion: data.descripcion || '',
-            cliente: data.cliente || '',
-            empaque: data.empaque || 'caja',
-            u: Number(data.u) || 0,
-            c: Number(data.c) || 0,
-            total: Number(data.total) || 0,
-            creado: data.creado || '',
-            sync: !d.metadata.hasPendingWrites,
-          });
-        });
-        list.sort((a, b) => String(b.creado).localeCompare(String(a.creado)));
-        setDocMetaCache('ing', metaMap);
-        setCloudIngresos(list);
-        setSyncOk(true);
-        setLastSyncTime(new Date());
-      },
-      wrapErr(OperationType.LIST, COL_INGRESOS)
-    );
-
-    const unsubPlan = onSnapshot(
-      qPlan,
-      (snap) => {
-        const metaMap = new Map<string, DocMeta>();
-        const nextSap: Record<string, PlanDespacho> = {};
-        const nextOp: Record<string, PlanOp> = {};
-        snap.forEach((d) => {
-          const data = d.data() as any;
-          metaMap.set(d.id, {
-            ownerUid: data.ownerUid,
-            ownerEmail: data.ownerEmail,
-            allowedEmails: data.allowedEmails || [],
-            createdAt: data.createdAt,
-          });
-          if (data.tipo === 'sap' && data.fdesp) {
-            nextSap[data.fdesp] = {
-              archivo: data.archivo || '',
-              items: Array.isArray(data.items) ? data.items : [],
-            };
-          } else if (data.tipo === 'op' && data.fdesp) {
-            nextOp[data.fdesp] = {
-              archivo: data.archivo || '',
-              items: Array.isArray(data.items) ? data.items : [],
-            };
-          }
-        });
-        setDocMetaCache('plan', metaMap);
-        setCloudPlanes(nextSap);
-        setCloudPlanesOp(nextOp);
-      },
-      wrapErr(OperationType.LIST, COL_PLANES)
-    );
-
-    const unsubExtra = onSnapshot(
-      qExtra,
-      (snap) => {
-        const metaMap = new Map<string, DocMeta>();
-        const nextExtra: Record<string, OpExtra> = {};
-        snap.forEach((d) => {
-          const data = d.data() as any;
-          metaMap.set(d.id, {
-            ownerUid: data.ownerUid,
-            ownerEmail: data.ownerEmail,
-            allowedEmails: data.allowedEmails || [],
-            createdAt: data.createdAt,
-          });
-          if (data.key) {
-            nextExtra[data.key] = {
-              enProduccion: Boolean(data.enProduccion),
-              cantPlanta: Number(data.cantPlanta) || 0,
-            };
-          }
-        });
-        setDocMetaCache('extra', metaMap);
-        setCloudOpExtra(nextExtra);
-      },
-      wrapErr(OperationType.LIST, COL_OP_EXTRAS)
-    );
-
-    const unsubWs = onSnapshot(
-      doc(db, COL_WORKSPACES, WORKSPACE_DOC_ID),
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data() as any;
-          setWorkspaceMeta({
-            ownerUid: data.ownerUid,
-            ownerEmail: data.ownerEmail,
-            allowedEmails: data.allowedEmails || [],
-            createdAt: data.createdAt,
-          });
-          setCloudNombres(Array.isArray(data.nombres) ? data.nombres : []);
-          const emails = Array.isArray(data.teamEmails) && data.teamEmails.length
-            ? data.teamEmails
-            : [ADMIN_EMAIL];
-          setTeamEmails(emails);
-        } else {
-          setWorkspaceMeta(undefined);
-          setTeamEmails(
-            Array.from(new Set([ADMIN_EMAIL, userEmail])).slice(0, 15)
-          );
-        }
-      },
-      wrapErr(OperationType.GET, `${COL_WORKSPACES}/${WORKSPACE_DOC_ID}`)
-    );
-
-    return () => {
-      unsubReg();
-      unsubIng();
-      unsubPlan();
-      unsubExtra();
-      unsubWs();
-    };
-  }, [authReady, user, authRefreshTick]);
-
-  // Save session context
+  // Save session states
   useEffect(() => {
     sv(K_SESION, { fdesp, fecha, turno, nombre, dia: hoy() });
   }, [fdesp, fecha, turno, nombre]);
@@ -528,135 +267,354 @@ export const App: React.FC = () => {
     sv(K_MODO_ING, modoIng);
   }, [modoIng]);
 
-  // Compute merged view (cloud truth + any unmigrated legacy localStorage items)
-  const cloudRegIds = useMemo(
-    () => new Set(cloudRegistros.map((r) => sanitizeDocId(r.id, 'reg'))),
-    [cloudRegistros]
-  );
-  const cloudIngIds = useMemo(
-    () => new Set(cloudIngresos.map((r) => sanitizeDocId(r.id, 'ing'))),
-    [cloudIngresos]
-  );
+  // References to latest state for async functions
+  const registrosRef = useRef(registros);
+  registrosRef.current = registros;
+  const ingresosRef = useRef(ingresos);
+  ingresosRef.current = ingresos;
+  const nombresRef = useRef(nombres);
+  nombresRef.current = nombres;
 
-  const unmigratedRegistros = useMemo(
-    () =>
-      legacyRegistros
-        .filter((r) => !cloudRegIds.has(sanitizeDocId(r.id, 'reg')))
-        .map((r) => ({ ...r, sync: false })),
-    [legacyRegistros, cloudRegIds]
-  );
-  const unmigratedIngresos = useMemo(
-    () =>
-      legacyIngresos
-        .filter((r) => !cloudIngIds.has(sanitizeDocId(r.id, 'ing')))
-        .map((r) => ({ ...r, sync: false })),
-    [legacyIngresos, cloudIngIds]
-  );
-
-  const registros = useMemo(
-    () => [...cloudRegistros, ...unmigratedRegistros],
-    [cloudRegistros, unmigratedRegistros]
-  );
-  const ingresos = useMemo(
-    () => [...cloudIngresos, ...unmigratedIngresos],
-    [cloudIngresos, unmigratedIngresos]
-  );
-  const planes = useMemo(
-    () => ({ ...legacyPlanes, ...cloudPlanes }),
-    [legacyPlanes, cloudPlanes]
-  );
-  const planesOp = useMemo(
-    () => ({ ...legacyPlanesOp, ...cloudPlanesOp }),
-    [legacyPlanesOp, cloudPlanesOp]
-  );
-  const opExtra = useMemo(
-    () => ({ ...legacyOpExtra, ...cloudOpExtra }),
-    [legacyOpExtra, cloudOpExtra]
-  );
-  const nombres = useMemo(() => {
-    const merged = Array.from(new Set([...cloudNombres, ...legacyNombres]))
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
-    return merged;
-  }, [cloudNombres, legacyNombres]);
-
-  const legacyPending = useMemo(() => {
-    const cloudPlanKeys = new Set(Object.keys(cloudPlanes));
-    const cloudPlanOpKeys = new Set(Object.keys(cloudPlanesOp));
-    const cloudExtraKeys = new Set(Object.keys(cloudOpExtra));
-    const pendPlanes =
-      Object.keys(legacyPlanes).filter((k) => {
-        const ck = normFecha(k);
-        return ck && !cloudPlanKeys.has(ck) && legacyPlanes[k]?.items?.length;
-      }).length +
-      Object.keys(legacyPlanesOp).filter((k) => {
-        const ck = normFecha(k);
-        return ck && !cloudPlanOpKeys.has(ck) && legacyPlanesOp[k]?.items?.length;
-      }).length;
-    const pendExtras = Object.keys(legacyOpExtra).filter(
-      (k) => k.includes('|') && !cloudExtraKeys.has(k)
-    ).length;
-
-    return {
-      registros: unmigratedRegistros.length,
-      ingresos: unmigratedIngresos.length,
-      planes: pendPlanes,
-      extras: pendExtras,
-    };
-  }, [
-    unmigratedRegistros.length,
-    unmigratedIngresos.length,
-    legacyPlanes,
-    legacyPlanesOp,
-    legacyOpExtra,
-    cloudPlanes,
-    cloudPlanesOp,
-    cloudOpExtra,
-  ]);
-
-  // Supabase catalog sync
-  const cargarCatalogoSb = useCallback(
-    async (showFeedback = false): Promise<boolean> => {
-      setCatLoading(true);
+  // Sheets sync methods
+  const enviarRegistros = useCallback(
+    async (rs: Registro[], showToast = false): Promise<boolean> => {
+      const validos = soloValidos(rs, showToast, toast);
+      if (!validos.length) return true;
       try {
-        const rows = await leerCatalogoSb();
-        const mp: Record<string, CatalogoOp> = {};
-        const ord: string[] = [];
-        rows.forEach((r) => {
-          const it = normOpSb(r);
-          if (!it) return;
-          const k = it.op.toLowerCase();
-          if (!(k in mp)) ord.push(k);
-          mp[k] = it;
-        });
-        const nuevo = ord.map((k) => mp[k]);
-        if (nuevo.length) {
-          catCountRef.current = nuevo.length;
-          setCatalogo(nuevo);
-          idbSet(K_CAT, nuevo);
-          sv(K_CAT, nuevo);
-          try {
-            localStorage.setItem(K_CATTS, String(Date.now()));
-          } catch {}
-          setCatErr('');
-          if (showFeedback) toast('ok', `Catálogo cargado: ${nuevo.length} OP`);
-          return true;
+        const CHUNK = 25;
+        for (let i = 0; i < validos.length; i += CHUNK) {
+          const batch = validos.slice(i, i + CHUNK);
+          await llamar({ action: 'upsert', records: batch });
+          const batchIds = new Set(batch.map((x) => x.id));
+          const updated = registrosRef.current.map((r) =>
+            batchIds.has(r.id) ? { ...r, sync: true } : r
+          );
+          registrosRef.current = updated;
+          setRegistros(updated);
+          sv(K_REG, updated);
         }
-        throw new Error('Supabase devolvió 0 OP');
-      } catch (e: any) {
-        const msg = String(e?.message || e).slice(0, 100);
-        setCatErr(msg);
-        if (showFeedback) toast('error', `No se pudo cargar catálogo: ${msg.slice(0, 70)}`);
+        setSyncOk(true);
+        setLastSyncTime(new Date());
+        if (showToast) toast('ok', `Enviado a Sheets (${validos.length})`);
+        return true;
+      } catch (err: any) {
+        setSyncOk(false);
+        setLastSyncTime(new Date());
+        if (showToast) {
+          toast('error', `Sheets: ${String(err.message || err).slice(0, 120)}`);
+        }
         return false;
-      } finally {
-        setCatLoading(false);
       }
     },
     [toast]
   );
 
-  // Initial Catalog Hydration (IndexedDB fallback + Supabase Auto-Refresh)
+  const enviarIngresos = useCallback(
+    async (rs: Ingreso[], showToast = false): Promise<boolean> => {
+      const validos = soloValidos(rs, showToast, toast);
+      if (!validos.length) return true;
+      try {
+        const CHUNK = 25;
+        for (let i = 0; i < validos.length; i += CHUNK) {
+          const batch = validos.slice(i, i + CHUNK);
+          await llamar({ action: 'upsert', tabla: 'ingresos', records: batch });
+          const batchIds = new Set(batch.map((x) => x.id));
+          const updated = ingresosRef.current.map((r) =>
+            batchIds.has(r.id) ? { ...r, sync: true } : r
+          );
+          ingresosRef.current = updated;
+          setIngresos(updated);
+          sv(K_ING, updated);
+        }
+        setSyncOk(true);
+        setLastSyncTime(new Date());
+        if (showToast) toast('ok', `Enviado a Sheets (${validos.length})`);
+        return true;
+      } catch (err: any) {
+        setSyncOk(false);
+        setLastSyncTime(new Date());
+        if (showToast) {
+          toast('error', `Sheets: ${String(err.message || err).slice(0, 120)}`);
+        }
+        return false;
+      }
+    },
+    [toast]
+  );
+
+  const traerRegistros = useCallback(
+    async (quiet = true) => {
+      try {
+        const j = await llamar({ action: 'list' });
+        if (!Array.isArray(j.records)) throw new Error('Respuesta sin lista de registros');
+
+        const fh = huella(j.records);
+        if (quiet && firmaRef.current.reg === fh) return;
+        firmaRef.current.reg = fh;
+
+        const pend = colaDel();
+        let curr = [...registrosRef.current];
+        const ids: Record<string, boolean> = {};
+        j.records.forEach((x: any) => {
+          ids[String(x.id).trim()] = true;
+        });
+
+        if (quiet) {
+          curr = curr.filter((r) => !r.sync || ids[r.id]);
+        }
+
+        const idxMap: Record<string, number> = {};
+        curr.forEach((r, idx) => {
+          idxMap[r.id] = idx;
+        });
+
+        let n = 0;
+        let omit = 0;
+        const newNombres = [...nombresRef.current];
+
+        j.records.forEach((x: any) => {
+          if (!recRemotoOk(x, pend, 'registros')) {
+            omit++;
+            return;
+          }
+          ['pedido', 'u', 'c', 'total', 'ord'].forEach((k) => {
+            x[k] = parseInt(x[k], 10) || 0;
+          });
+          x.sync = true;
+          ['id', 'fecha', 'fdesp', 'turno', 'nombre', 'op', 'sap', 'descripcion', 'cliente', 'empaque', 'estado', 'creado'].forEach((k) => {
+            x[k] = x[k] == null ? '' : String(x[k]).trim();
+          });
+          x.fecha = normFecha(x.fecha);
+          x.fdesp = normFecha(x.fdesp);
+          if (!x.fdesp) x.fdesp = x.fecha;
+
+          const i = idxMap[x.id];
+          if (i === undefined) {
+            curr.push(x);
+            idxMap[x.id] = curr.length - 1;
+            n++;
+          } else if (curr[i].sync) {
+            if (!(x.ord > 0) && curr[i].ord && curr[i].ord! > 0) {
+              x.ord = curr[i].ord;
+            }
+            curr[i] = x;
+          }
+
+          if (x.nombre && newNombres.indexOf(x.nombre) === -1) {
+            newNombres.push(x.nombre);
+          }
+        });
+
+        newNombres.sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+        setNombres(newNombres);
+        sv(K_NOM, newNombres);
+
+        const { registrosLimpios, duplicadosEliminados } = sanitizarStockDuplicados(curr);
+        if (duplicadosEliminados.length > 0) {
+          duplicadosEliminados.forEach((d) => encolarDel(d.id, 'registros'));
+          curr = registrosLimpios;
+        }
+
+        setRegistros(curr);
+        sv(K_REG, curr);
+
+        if (!quiet) {
+          toast('ok', `${n} registro(s) nuevos traídos${omit ? ` · ${omit} omitidos por datos incompletos` : ''}`);
+        }
+      } catch (err: any) {
+        if (!quiet) toast('error', `No se pudo traer: ${String(err.message || err).slice(0, 60)}`);
+        throw err;
+      }
+    },
+    [toast]
+  );
+
+  const traerIngresos = useCallback(
+    async (quiet = true) => {
+      try {
+        const j = await llamar({ action: 'list', tabla: 'ingresos' });
+        if (!Array.isArray(j.records)) throw new Error('Respuesta sin lista de ingresos');
+
+        const fh = huella(j.records);
+        if (quiet && firmaRef.current.ing === fh) return;
+        firmaRef.current.ing = fh;
+
+        const pend = colaDel();
+        let curr = [...ingresosRef.current];
+        const ids: Record<string, boolean> = {};
+        j.records.forEach((x: any) => {
+          ids[String(x.id).trim()] = true;
+        });
+
+        if (quiet) {
+          curr = curr.filter((r) => !r.sync || ids[r.id]);
+        }
+
+        const idxMap: Record<string, number> = {};
+        curr.forEach((r, idx) => {
+          idxMap[r.id] = idx;
+        });
+
+        let n = 0;
+        let omit = 0;
+        const newNombres = [...nombresRef.current];
+
+        j.records.forEach((x: any) => {
+          if (!recRemotoOk(x, pend, 'ingresos')) {
+            omit++;
+            return;
+          }
+          ['u', 'c', 'total'].forEach((k) => {
+            x[k] = parseInt(x[k], 10) || 0;
+          });
+          ['id', 'fecha', 'turno', 'nombre', 'op', 'sap', 'descripcion', 'cliente', 'empaque', 'creado'].forEach((k) => {
+            x[k] = x[k] == null ? '' : String(x[k]).trim();
+          });
+          x.fecha = normFecha(x.fecha);
+          x.sync = true;
+
+          const i = idxMap[x.id];
+          if (i === undefined) {
+            curr.push(x);
+            idxMap[x.id] = curr.length - 1;
+            n++;
+          } else if (curr[i].sync) {
+            curr[i] = x;
+          }
+
+          if (x.nombre && newNombres.indexOf(x.nombre) === -1) {
+            newNombres.push(x.nombre);
+          }
+        });
+
+        newNombres.sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+        setNombres(newNombres);
+        sv(K_NOM, newNombres);
+
+        setIngresos(curr);
+        sv(K_ING, curr);
+
+        if (!quiet) {
+          toast('ok', `${n} ingreso(s) nuevos traídos${omit ? ` · ${omit} omitidos por datos incompletos` : ''}`);
+        }
+      } catch (err: any) {
+        if (!quiet) toast('error', `No se pudo traer: ${String(err.message || err).slice(0, 60)}`);
+        throw err;
+      }
+    },
+    [toast]
+  );
+
+  // AutoSync cycle
+  const runAutoSync = useCallback(
+    async (force = false) => {
+      const isTyping = Date.now() - lastKeyTimeRef.current < 4000;
+      if (!force && isTyping) return;
+      if (!force && Date.now() < syncNextRetryRef.current) return;
+      if (syncBusyRef.current && Date.now() - syncStartRef.current < 45000) return;
+      if (!navigator.onLine) return;
+
+      syncBusyRef.current = true;
+      syncStartRef.current = Date.now();
+
+      try {
+        await procesarDel();
+        const pr = registrosRef.current.filter((r) => !r.sync);
+        const pi = ingresosRef.current.filter((r) => !r.sync);
+        const okR = pr.length ? await enviarRegistros(pr, false) : true;
+        const okI = pi.length ? await enviarIngresos(pi, false) : true;
+        await traerRegistros(true);
+        await traerIngresos(true);
+        if (!okR || !okI) throw new Error('Pendiente de envío');
+        syncFailCountRef.current = 0;
+        syncNextRetryRef.current = 0;
+        setSyncOk(true);
+        setLastSyncTime(new Date());
+      } catch {
+        syncFailCountRef.current = Math.min(syncFailCountRef.current + 1, 4);
+        const waitMs = Math.min(60000, 15000 * Math.pow(2, syncFailCountRef.current - 1));
+        syncNextRetryRef.current = Date.now() + waitMs;
+        setSyncOk(false);
+        setLastSyncTime(new Date());
+      } finally {
+        syncBusyRef.current = false;
+      }
+    },
+    [enviarRegistros, enviarIngresos, traerRegistros, traerIngresos]
+  );
+
+  // AutoSync timer
+  useEffect(() => {
+    const t = setTimeout(() => runAutoSync(false), 1500);
+    const interval = setInterval(() => {
+      if (!document.hidden) runAutoSync(false);
+    }, 15000);
+
+    const handleFocus = () => {
+      if (Date.now() - syncStartRef.current > 8000) runAutoSync(false);
+    };
+    const handleVisibility = () => {
+      if (!document.hidden && Date.now() - syncStartRef.current > 8000) {
+        runAutoSync(false);
+      }
+    };
+    const handleOnlineSync = () => {
+      syncNextRetryRef.current = 0;
+      syncFailCountRef.current = 0;
+      runAutoSync(true);
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('online', handleOnlineSync);
+
+    return () => {
+      clearTimeout(t);
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('online', handleOnlineSync);
+    };
+  }, [runAutoSync]);
+
+  const cargarCatalogoSb = useCallback(async (showFeedback = false): Promise<boolean> => {
+    setCatLoading(true);
+    try {
+      const rows = await leerCatalogoSb();
+      const mp: Record<string, CatalogoOp> = {};
+      const ord: string[] = [];
+      rows.forEach((r) => {
+        const it = normOpSb(r);
+        if (!it) return;
+        const k = it.op.toLowerCase();
+        if (!(k in mp)) ord.push(k);
+        mp[k] = it;
+      });
+      const nuevo = ord.map((k) => mp[k]);
+      if (nuevo.length) {
+        catCountRef.current = nuevo.length;
+        setCatalogo(nuevo);
+        idbSet(K_CAT, nuevo);
+        sv(K_CAT, nuevo);
+        try {
+          localStorage.setItem(K_CATTS, String(Date.now()));
+        } catch {}
+        setCatErr('');
+        if (showFeedback) toast('ok', `Catálogo cargado: ${nuevo.length} OP`);
+        return true;
+      }
+      throw new Error('Supabase devolvió 0 OP');
+    } catch (e: any) {
+      const msg = String(e?.message || e).slice(0, 100);
+      setCatErr(msg);
+      if (showFeedback) toast('error', `No se pudo cargar catálogo: ${msg.slice(0, 70)}`);
+      return false;
+    } finally {
+      setCatLoading(false);
+    }
+  }, [toast]);
+
+  // Initial Catalog Hydration (IndexedDB fallback + Supabase Auto-Refresh with retry if empty)
   useEffect(() => {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -675,6 +633,7 @@ export const App: React.FC = () => {
           hasLocal = true;
         }
       } else {
+        // Ensure IndexedDB also holds a copy of localStorage catalog
         idbSet(K_CAT, catalogo);
       }
 
@@ -708,192 +667,53 @@ export const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cargarCatalogoSb]);
 
-  // Firestore mutation wrappers
-  const runFs = useCallback(async (fn: () => Promise<void>) => {
-    try {
-      await fn();
-      setSyncOk(true);
-      setLastSyncTime(new Date());
-    } catch (err) {
-      setSyncOk(false);
-      setFatalError(err instanceof Error ? err : new Error(String(err)));
+  // Handle Updates
+  const handleRegistrosChange = (newRegs: Registro[], toSend?: Registro[]) => {
+    registrosRef.current = newRegs;
+    setRegistros(newRegs);
+    sv(K_REG, newRegs);
+    if (toSend && toSend.length) {
+      enviarRegistros(toSend, false);
     }
-  }, []);
+  };
 
-  const handleRegistrosChange = useCallback(
-    (newRegs: Registro[], toSend?: Registro[]) => {
-      sv(K_REG, newRegs);
-      setLegacyRegistros((prev) =>
-        prev.filter((p) => newRegs.some((n) => n.id === p.id))
-      );
-      if (user && toSend && toSend.length) {
-        runFs(() => saveRegistrosBatchFs(toSend, user, teamEmails));
-      }
-    },
-    [user, teamEmails, runFs]
-  );
-
-  const handleIngresosChange = useCallback(
-    (newIngs: Ingreso[], toSend?: Ingreso[]) => {
-      sv(K_ING, newIngs);
-      setLegacyIngresos((prev) =>
-        prev.filter((p) => newIngs.some((n) => n.id === p.id))
-      );
-      if (user && toSend && toSend.length) {
-        runFs(() => saveIngresosBatchFs(toSend, user, teamEmails));
-      }
-    },
-    [user, teamEmails, runFs]
-  );
-
-  const handleBorrarRemotoRegistro = useCallback(
-    (id: string) => {
-      setLegacyRegistros((prev) => {
-        const next = prev.filter((x) => x.id !== id);
-        sv(K_REG, next);
-        return next;
-      });
-      if (user && cloudRegIds.has(sanitizeDocId(id, 'reg'))) {
-        runFs(() => deleteRegistroFs(id));
-      }
-    },
-    [user, cloudRegIds, runFs]
-  );
-
-  const handleBorrarRemotoIngreso = useCallback(
-    (id: string) => {
-      setLegacyIngresos((prev) => {
-        const next = prev.filter((x) => x.id !== id);
-        sv(K_ING, next);
-        return next;
-      });
-      if (user && cloudIngIds.has(sanitizeDocId(id, 'ing'))) {
-        runFs(() => deleteIngresoFs(id));
-      }
-    },
-    [user, cloudIngIds, runFs]
-  );
-
-  const handlePlanesChange = useCallback(
-    (p: Record<string, PlanDespacho>) => {
-      setLegacyPlanes(p);
-      sv(K_PLAN, p);
-      if (user && p[fdesp]) {
-        runFs(() => savePlanFs('sap', fdesp, p[fdesp], user, teamEmails));
-      }
-    },
-    [user, fdesp, teamEmails, runFs]
-  );
-
-  const handlePlanesOpChange = useCallback(
-    (p: Record<string, PlanOp>) => {
-      setLegacyPlanesOp(p);
-      sv(K_PLANOP, p);
-      if (user && p[fdesp]) {
-        runFs(() => savePlanFs('op', fdesp, p[fdesp], user, teamEmails));
-      }
-    },
-    [user, fdesp, teamEmails, runFs]
-  );
-
-  const handleUpdateOpExtra = useCallback(
-    (op: string, fd: string, changes: Partial<OpExtra>) => {
-      const k = `${op.trim().toLowerCase()}|${fd || ''}`;
-      const cur = opExtra[k] || opExtra[op.trim().toLowerCase()] || {};
-      const nextVal: OpExtra = { ...cur, ...changes };
-      setLegacyOpExtra((prev) => {
-        const updated = { ...prev, [k]: nextVal };
-        if (!fd) updated[op.trim().toLowerCase()] = nextVal;
-        sv(K_OP_EXTRA, updated);
-        return updated;
-      });
-      if (user) {
-        const docKey = opExtraDocId(op, fd);
-        void docKey;
-        runFs(() => saveOpExtraFs(op, fd, nextVal, user, teamEmails));
-      }
-    },
-    [opExtra, user, teamEmails, runFs]
-  );
-
-  const handleNombresChange = useCallback(
-    (newN: string[]) => {
-      setLegacyNombres(newN);
-      sv(K_NOM, newN);
-      if (user) {
-        runFs(() => saveWorkspaceConfigFs(newN, teamEmails, workspaceMeta, user, false));
-      }
-    },
-    [user, teamEmails, workspaceMeta, runFs]
-  );
-
-  const handleTeamEmailsChange = useCallback(
-    async (emails: string[]) => {
-      if (!user) return;
-      setTeamEmails(emails);
-      await runFs(async () => {
-        await saveWorkspaceConfigFs(nombres, emails, workspaceMeta, user, true);
-        await propagateTeamEmailsFs(user, emails);
-      });
-    },
-    [user, nombres, workspaceMeta, runFs]
-  );
-
-  const handleMigrateLocal = useCallback(async () => {
-    if (!user || migrating) return;
-    setMigrating(true);
-    try {
-      const res = await migrateLegacyLocalDataFs({
-        user,
-        teamEmails,
-        workspaceMeta,
-        cloudRegistrosIds: cloudRegIds,
-        cloudIngresosIds: cloudIngIds,
-        cloudPlanesKeys: new Set(Object.keys(cloudPlanes)),
-        cloudPlanesOpKeys: new Set(Object.keys(cloudPlanesOp)),
-        cloudExtraKeys: new Set(Object.keys(cloudOpExtra)),
-        localRegistros: legacyRegistros,
-        localIngresos: legacyIngresos,
-        localPlanes: legacyPlanes,
-        localPlanesOp: legacyPlanesOp,
-        localOpExtra: legacyOpExtra,
-        localNombres: legacyNombres,
-        cloudNombres,
-      });
-      toast(
-        'ok',
-        `Migrado a Firestore: ${res.regs} reg., ${res.ings} ing., ${res.planes} lista(s), ${res.extras} estado(s)`
-      );
-    } catch (err) {
-      setFatalError(err instanceof Error ? err : new Error(String(err)));
-    } finally {
-      setMigrating(false);
+  const handleIngresosChange = (newIngs: Ingreso[], toSend?: Ingreso[]) => {
+    ingresosRef.current = newIngs;
+    setIngresos(newIngs);
+    sv(K_ING, newIngs);
+    if (toSend && toSend.length) {
+      enviarIngresos(toSend, false);
     }
-  }, [
-    user,
-    migrating,
-    teamEmails,
-    workspaceMeta,
-    cloudRegIds,
-    cloudIngIds,
-    cloudPlanes,
-    cloudPlanesOp,
-    cloudOpExtra,
-    legacyRegistros,
-    legacyIngresos,
-    legacyPlanes,
-    legacyPlanesOp,
-    legacyOpExtra,
-    legacyNombres,
-    cloudNombres,
-    toast,
-  ]);
+  };
+
+  const handlePlanesChange = (p: Record<string, PlanDespacho>) => {
+    setPlanes(p);
+    sv(K_PLAN, p);
+  };
+
+  const handlePlanesOpChange = (p: Record<string, PlanOp>) => {
+    setPlanesOp(p);
+    sv(K_PLANOP, p);
+  };
+
+  const handleNombresChange = (newN: string[]) => {
+    setNombres(newN);
+    sv(K_NOM, newN);
+  };
 
   const handleCatalogoChange = (newC: CatalogoOp[]) => {
     catCountRef.current = newC.length;
     setCatalogo(newC);
     idbSet(K_CAT, newC);
     sv(K_CAT, newC);
+  };
+
+  const handleBorrarRemotoRegistro = (id: string) => {
+    encolarDel(id, 'registros');
+  };
+
+  const handleBorrarRemotoIngreso = (id: string) => {
+    encolarDel(id, 'ingresos');
   };
 
   const handleInstallClick = () => {
@@ -908,59 +728,14 @@ export const App: React.FC = () => {
         setCanInstall(false);
       });
     } else {
-      toast('ok', 'Para instalar en Android: abre el menú de Chrome (⋮) y elige "Instalar aplicación".');
+      toast('ok', 'Para instalar en Android: abre el menú de Chrome (⋮) y elige "Instalar aplicación" o "Agregar a la pantalla principal".');
     }
   };
-
-  const handleSignOut = async () => {
-    if (!window.confirm('¿Cerrar sesión en este equipo?')) return;
-    await signOut(auth);
-  };
-
-  const handleIrARegistrar = (op?: string, targetFdesp?: string) => {
-    if (targetFdesp) setFdesp(targetFdesp);
-    if (op) {
-      setPrefillOp({ op, fdesp: targetFdesp || fdesp, nonce: Date.now() });
-    }
-    setActiveTab('reg');
-  };
-
-  if (!authReady || !user || !user.emailVerified) {
-    return (
-      <AuthGate
-        loading={!authReady}
-        unverifiedUser={user && !user.emailVerified ? user : null}
-        onRefreshVerification={async () => {
-          if (!auth.currentUser) return false;
-          await auth.currentUser.reload();
-          await auth.currentUser.getIdToken(true);
-          setUser(auth.currentUser);
-          setAuthRefreshTick((t) => t + 1);
-          return Boolean(auth.currentUser.emailVerified);
-        }}
-        localStats={{
-          registros: legacyRegistros.length,
-          ingresos: legacyIngresos.length,
-        }}
-      />
-    );
-  }
-
-  const userEmail = (user.email || '').toLowerCase();
-  const canManageTeam =
-    !workspaceMeta ||
-    workspaceMeta.ownerUid === user.uid ||
-    userEmail === ADMIN_EMAIL;
 
   const pendingCount =
-    registros.filter((r) => r.sync === false).length +
-    ingresos.filter((r) => r.sync === false).length;
-
-  const totalLegacyPend =
-    legacyPending.registros +
-    legacyPending.ingresos +
-    legacyPending.planes +
-    legacyPending.extras;
+    registros.filter((r) => !r.sync).length +
+    ingresos.filter((r) => !r.sync).length +
+    colaDel().length;
 
   return (
     <div>
@@ -969,8 +744,6 @@ export const App: React.FC = () => {
         onTabChange={setActiveTab}
         canInstall={canInstall}
         onInstall={handleInstallClick}
-        userEmail={userEmail}
-        onSignOut={handleSignOut}
         fecha={fecha}
         onFechaChange={setFecha}
         nombre={nombre}
@@ -987,44 +760,6 @@ export const App: React.FC = () => {
       />
 
       <main className="wrap">
-        {cloudReady && totalLegacyPend > 0 && activeTab !== 'cfg' && (
-          <div className="panel migration-banner">
-            <div>
-              <strong>Datos locales detectados en este dispositivo</strong>
-              <div className="info" style={{ fontSize: '0.82rem' }}>
-                Faltan subir a Firebase {legacyPending.registros} entrega(s), {legacyPending.ingresos} ingreso(s), {legacyPending.planes} lista(s) y {legacyPending.extras} estado(s) locales.
-              </div>
-            </div>
-            <button
-              type="button"
-              className="btn"
-              disabled={migrating}
-              style={{ width: 'auto', minHeight: '38px', padding: '6px 16px', fontSize: '0.86rem' }}
-              onClick={handleMigrateLocal}
-            >
-              {migrating ? 'Subiendo...' : 'Migrar datos locales a Firestore'}
-            </button>
-          </div>
-        )}
-
-        {activeTab === 'dash' && (
-          <TableroTab
-            fdesp={fdesp}
-            onFdespChange={setFdesp}
-            registros={registros}
-            onRegistrosChange={handleRegistrosChange}
-            ingresos={ingresos}
-            catalogo={catalogo}
-            planes={planes}
-            planesOp={planesOp}
-            opExtra={opExtra}
-            onUpdateOpExtra={handleUpdateOpExtra}
-            onIrARegistrar={handleIrARegistrar}
-            onIrAIngresos={() => setActiveTab('ing')}
-            onToast={toast}
-          />
-        )}
-
         {activeTab === 'reg' && (
           <RegistrarTab
             fdesp={fdesp}
@@ -1033,7 +768,6 @@ export const App: React.FC = () => {
             nombre={nombre}
             turno={turno}
             registros={registros}
-            ingresos={ingresos}
             onRegistrosChange={handleRegistrosChange}
             catalogo={catalogo}
             catLoading={catLoading}
@@ -1048,7 +782,6 @@ export const App: React.FC = () => {
             opExtra={opExtra}
             onUpdateOpExtra={handleUpdateOpExtra}
             onBorrarRemoto={handleBorrarRemotoRegistro}
-            prefillOp={prefillOp}
             onToast={toast}
           />
         )}
@@ -1062,6 +795,15 @@ export const App: React.FC = () => {
             planesOp={planesOp}
             opExtra={opExtra}
             onUpdateOpExtra={handleUpdateOpExtra}
+            onEnviarSheets={() => {
+              const p = registros.filter((r) => !r.sync);
+              if (!p.length) {
+                toast('ok', 'Todo está sincronizado');
+                return;
+              }
+              enviarRegistros(p, true);
+            }}
+            onTraerSheets={() => traerRegistros(false)}
             onBorrarRemoto={handleBorrarRemotoRegistro}
             onToast={toast}
           />
@@ -1073,7 +815,6 @@ export const App: React.FC = () => {
             iNombre={iNombre}
             iTurno={iTurno}
             ingresos={ingresos}
-            registros={registros}
             onIngresosChange={handleIngresosChange}
             catalogo={catalogo}
             catLoading={catLoading}
@@ -1082,6 +823,15 @@ export const App: React.FC = () => {
             nombres={nombres}
             modoIng={modoIng}
             onModoIngChange={setModoIng}
+            onEnviarSheets={() => {
+              const p = ingresos.filter((r) => !r.sync);
+              if (!p.length) {
+                toast('ok', 'Todo está sincronizado');
+                return;
+              }
+              enviarIngresos(p, true);
+            }}
+            onTraerSheets={() => traerIngresos(false)}
             onBorrarRemoto={handleBorrarRemotoIngreso}
             onToast={toast}
           />
@@ -1099,15 +849,6 @@ export const App: React.FC = () => {
             onIngresosChange={handleIngresosChange}
             catErr={catErr}
             onCatErrChange={setCatErr}
-            userEmail={userEmail}
-            canManageTeam={canManageTeam}
-            teamEmails={teamEmails}
-            onTeamEmailsChange={handleTeamEmailsChange}
-            legacyPending={legacyPending}
-            migrating={migrating}
-            onMigrateLocal={handleMigrateLocal}
-            onBorrarRemoto={handleBorrarRemotoRegistro}
-            onSignOut={handleSignOut}
             onToast={toast}
           />
         )}
@@ -1120,6 +861,12 @@ export const App: React.FC = () => {
         isOnline={isOnline}
         syncOk={syncOk}
         pendingCount={pendingCount}
+        onSyncNow={() => {
+          syncBusyRef.current = false;
+          syncNextRetryRef.current = 0;
+          syncFailCountRef.current = 0;
+          runAutoSync(true);
+        }}
       />
     </div>
   );
